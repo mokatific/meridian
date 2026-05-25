@@ -130,8 +130,7 @@ Only call this if you need the current price to calculate a specific bin range (
       description: `Open a new DLMM liquidity position.
 
 PRIORITY ORDER for strategy and bins:
-1. User explicitly specifies → always follow exactly (user override is absolute)
-2. No user spec → use active strategy's lp_strategy and choose bins based on volatility
+Strategy is fixed to the configured default ("${config.strategy.strategy}"). The LLM must NOT override it. User can change strategy by editing user-config.json.
 
 HARD RULES:
 - Never use 'curve'.
@@ -142,7 +141,7 @@ HARD RULES:
   use bins_below only, keep bins_above=0, and the upper bin will be pinned to the current active bin.
 
 Guidelines (only when user hasn't specified):
-- Strategy: use the active strategy's lp_strategy field (bid_ask or spot)
+- Strategy: Fixed to "${config.strategy.strategy}" (from config). Do NOT pass a strategy parameter.
 - Bins: choose from configured minBinsBelow/maxBinsBelow by positive volatility. The hard lower floor is 35 bins.
 - Deposit: single-sided SOL only: set amount_y/amount_sol, keep amount_x=0.
 
@@ -166,12 +165,6 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
           amount_sol: {
             type: "number",
             description: "Alias for amount_y. For backward compatibility.",
-          },
-          strategy: {
-            type: "string",
-            enum: ["bid_ask", "spot"],
-            description:
-              "DLMM strategy type. If user specifies, use exactly what they said. Otherwise use the active strategy's lp_strategy field.",
           },
           bins_below: {
             type: "number",

@@ -33,6 +33,7 @@ import {
   getTrackedPositions,
   setPositionInstruction,
   updatePnlAndCheckExits,
+  minutesOutOfRange,
   queuePeakConfirmation,
   resolvePendingPeak,
   queueTrailingDropConfirmation,
@@ -51,6 +52,7 @@ import {
   registerVirtualPosition,
   evaluateVirtualPositions,
   getVirtualSummary,
+  getVirtualWalletSummary,
 } from "./dry-run-simulator.js";
 import { getCausalAnalysisSummary } from "./causal-analysis.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
@@ -66,6 +68,7 @@ import {
   registerHiveMindAgent,
   startHiveMindBackgroundSync,
 } from "./hivemind.js";
+import { initLogger, logManagementCycle, logScreeningCycle } from "./position-logger.js";
 import { appendDecision } from "./decision-log.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
@@ -475,6 +478,20 @@ After executing, write a brief one-line result per position.
       await liveMessage?.note("No tool actions needed.");
     }
 
+    // Log management cycle
+    initLogger();
+    logManagementCycle({
+      positions: positions.length,
+      openPositions: positionData.filter((p) => actionMap.get(p.position)?.action !== "CLOSE")
+        .length,
+      totalValueUsd: totalValue,
+      totalUnclaimedUsd: totalUnclaimed,
+      actions: actionSummary,
+      needsLLM: actionPositions.length > 0,
+      llmModel: config.llm.managementModel,
+      isDryRun: process.env.DRY_RUN === "true",
+    });
+
     // Trigger screening after management
     const afterPositions = await getMyPositions({ force: true }).catch(() => null);
     const afterCount = afterPositions?.positions?.length ?? 0;
@@ -573,10 +590,22 @@ export async function runScreeningCycle({ silent = false } = {}) {
   }
   timers.screeningLastRun = Date.now();
   log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
+  const isDryRun = process.env.DRY_RUN === "true";
+  const _screenLog = {
+    deployAmount: 0,
+    llmModel: config.llm.screeningModel,
+    isDryRun,
+    candidatesFound: 0,
+    candidatesPassed: 0,
+    filteredReasons: [],
+    deployAttempted: false,
+    deploySucceeded: false,
+  };
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
     const deployAmount = computeDeployAmount(currentBalance.sol);
+    _screenLog.deployAmount = deployAmount;
     log("cron", `Computed deploy amount: ${deployAmount} SOL (wallet: ${currentBalance.sol} SOL)`);
 
     // Load active strategy
@@ -608,6 +637,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
+    _screenLog.candidatesFound = (topCandidates?.candidates || topCandidates?.pools || []).length;
+    _screenLog.earlyFiltered = earlyFilteredExamples.length;
 
     const allCandidates = [];
     log("cron", `[DEBUG] Starting recon loop for ${candidates.length} candidates`);
@@ -671,6 +702,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
       }
       return true;
     });
+    _screenLog.candidatesPassed = passing.length;
+    _screenLog.filteredReasons = filteredOut.map((f) => `${f.name}: ${f.reason}`).slice(0, 5);
 
     if (passing.length === 0) {
       log("cron", `[DEBUG] passing.length === 0, returning no candidates`);
@@ -815,6 +848,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
     let deployAttempted = false;
     let deploySucceeded = false;
+    let lastDeployResult = null;
     log(
       "cron",
       `[DEBUG] Calling agentLoop with ${passing.length} candidates, goal length ${candidateBlocks.join("\\n\\n").length} chars`,
@@ -911,6 +945,7 @@ IMPORTANT:
               deploySucceeded = Boolean(
                 success && result?.success !== false && !result?.error && !result?.blocked,
               );
+              lastDeployResult = result;
             }
             await liveMessage?.toolFinish(name, result, success);
           },
@@ -950,6 +985,8 @@ IMPORTANT:
         reason: stripThink(content).slice(0, 500),
       });
     }
+    _screenLog.deployAttempted = deployAttempted;
+    _screenLog.deploySucceeded = deploySucceeded;
 
     // ── Wallet Evolution — discover new smart wallets, prune bad ones ──
     // Run async in background so it never delays the screening report
@@ -971,7 +1008,6 @@ IMPORTANT:
     }
 
     // ── Dry Run Simulator — register virtual position if deploy happened ──
-    const isDryRun = process.env.DRY_RUN === "true";
     if (isDryRun && deploySucceeded) {
       const deployedPool = passing.find(
         ({ pool }) => content.includes(pool.pool) && content.includes("DEPLOYED"),
@@ -983,7 +1019,10 @@ IMPORTANT:
           deployedPool.pool._sw_at_deploy = swAddresses;
         }
         const virtualId = await registerVirtualPosition(
-          { dry_run: true, would_deploy: { pool_address: deployedPool.pool.pool } },
+          lastDeployResult || {
+            dry_run: true,
+            would_deploy: { pool_address: deployedPool.pool.pool },
+          },
           deployedPool.pool,
           deployAmount,
         );
@@ -999,6 +1038,31 @@ IMPORTANT:
     screenReport = `Screening cycle failed: ${error.message}`;
   } finally {
     _screeningBusy = false;
+
+    // Log screening cycle result
+    initLogger();
+    const result = _screenLog.deploySucceeded
+      ? "deployed"
+      : _screenLog.deployAttempted
+        ? "deploy_failed"
+        : screenReport?.includes("NO DEPLOY")
+          ? "no_deploy"
+          : screenReport?.includes("skipped")
+            ? "skipped"
+            : screenReport?.includes("failed") || screenReport?.includes("cancelled")
+              ? "error"
+              : "other";
+    logScreeningCycle({
+      result,
+      summary: screenReport?.split("\n")?.[0] || "no report",
+      isDryRun,
+      deployAmount: _screenLog.deployAmount,
+      candidatesFound: _screenLog.candidatesFound,
+      candidatesPassed: _screenLog.candidatesPassed,
+      earlyFiltered: _screenLog.earlyFiltered,
+      filteredReasons: _screenLog.filteredReasons,
+      llmModel: _screenLog.llmModel,
+    });
 
     // P1: Evaluate previously skipped pools (fire-and-forget, non-blocking)
     import("./skipped-tracker.js")
@@ -1167,7 +1231,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
     }
   }, 30_000);
 
-  // Wallet Evolution - independent cron, configurable schedule
+  // Wallet Evolution — independent cron, configurable schedule
   // Default: "0 */2 * * *" (every 2h at :00). Live bots can set "30 1-23/2 * * *" (odd hours +30m)
   let _walletEvoBusy = false;
   const walletEvoCronExpr = config.schedule.walletEvoCron || "0 */2 * * *";
@@ -1385,14 +1449,32 @@ function describeLatestCandidates(limit = 5) {
 function formatWalletStatus(wallet, positions) {
   const deployAmount = computeDeployAmount(wallet.sol);
   const hive = isHiveMindEnabled() ? "on" : "off";
-  return [
+  const lines = [
     `Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
     `SOL price: $${wallet.sol_price}`,
     `Open positions: ${positions.total_positions}/${config.risk.maxPositions}`,
     `Next deploy amount: ${deployAmount} SOL`,
     `Dry run: ${process.env.DRY_RUN === "true" ? "yes" : "no"}`,
     `HiveMind: ${hive}`,
-  ].join("\n");
+  ];
+
+  if (process.env.DRY_RUN === "true") {
+    const w = getVirtualWalletSummary();
+    lines.splice(
+      1,
+      0,
+      `🪙 Virtual Wallet: ${w.balance.toFixed(3)} SOL / ${w.initial.toFixed(3)} SOL (${w.netPnlPct >= 0 ? "+" : ""}${w.netPnlPct}%)`,
+    );
+    if (w.totalDeployed > 0) {
+      lines.splice(
+        2,
+        0,
+        `   Deployed: ${w.totalDeployed.toFixed(3)} SOL | Returned: ${w.totalReturned.toFixed(3)} SOL | Gas+Slipp: ${w.totalFees.toFixed(4)} SOL`,
+      );
+    }
+  }
+
+  return lines.join("\n");
 }
 
 function formatConfigSnapshot() {
@@ -1972,7 +2054,7 @@ async function telegramHandler(msg) {
       const lines = positions.map((p, i) => {
         const pnl = p.pnl_usd >= 0 ? `+${cur}${p.pnl_usd}` : `-${cur}${Math.abs(p.pnl_usd)}`;
         const age = p.age_minutes != null ? `${p.age_minutes}m` : "?";
-        const oor = !p.in_range ? " ⚠️OOR" : "";
+        const oor = !p.in_range ? ` ⚠️OOR ${minutesOutOfRange(p.position)}m` : "";
         return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
       });
       await sendMessage(
@@ -2793,7 +2875,18 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
         }
         const fs = await import("fs");
         const lessonsData = JSON.parse(fs.default.readFileSync("./lessons.json", "utf8"));
-        const result = evolveThresholds(lessonsData.performance, config);
+        // In live mode, exclude virtual (dry run) data from evolution
+        const evolveData =
+          process.env.DRY_RUN === "true"
+            ? lessonsData.performance
+            : lessonsData.performance.filter((x) => !x.virtual);
+        if (evolveData.length < 5) {
+          console.log(
+            `\nNeed at least 5 non-virtual closed positions to evolve. ${5 - evolveData.length} more needed.\n`,
+          );
+          return;
+        }
+        const result = evolveThresholds(evolveData, config);
         if (!result || Object.keys(result.changes).length === 0) {
           console.log(
             "\nNo threshold changes needed — current settings already match performance data.\n",

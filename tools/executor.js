@@ -64,6 +64,7 @@ const TIMEFRAME_MINUTES = {
 };
 import { log, logAction } from "../logger.js";
 import { notifyDeploy, notifyClose, notifySwap } from "../telegram.js";
+import { logPositionOpen, logPositionClose, initLogger } from "../position-logger.js";
 
 function numberOrNull(value) {
   const n = Number(value);
@@ -674,6 +675,21 @@ export async function executeTool(name, args) {
           baseFee: result.base_fee,
           dryRun: isDryRun,
         }).catch(() => {});
+        initLogger();
+        logPositionOpen({
+          positionId: isDryRun ? args.position_key || "dry_run" : result.position,
+          poolAddress: args.pool_address || result.pool,
+          poolName: poolName,
+          amountSol: args.amount_y ?? args.amount_sol ?? 0,
+          dryRun: isDryRun,
+          volatility: result.volatility ?? args.volatility,
+          feeTvlRatio: result.fee_active_tvl_ratio ?? args.fee_active_tvl_ratio,
+          organic: result.organic_score ?? args.organic_score,
+          binStep: result.bin_step ?? args.bin_step,
+          priceRange: result.price_range,
+          rangeCoverage: result.range_coverage,
+          baseFee: result.base_fee,
+        });
       } else if (name === "close_position") {
         notifyClose({
           pair: result.pool_name || args.position_address?.slice(0, 8),
@@ -713,6 +729,18 @@ export async function executeTool(name, args) {
             log("executor_warn", `Auto-swap after close failed: ${e.message}`);
           }
         }
+        initLogger();
+        logPositionClose({
+          positionId: args.position_address,
+          poolAddress: result.pool || args.pool_address,
+          poolName: result.pool_name || args.pool_name,
+          pnlPct: result.pnl_pct,
+          pnlUsd: result.pnl_usd,
+          feesUsd: result.fees_usd,
+          reason: args.reason || result.reason,
+          autoSwapped: result.auto_swapped,
+          dryRun: result.dry_run === true,
+        });
       } else if (
         name === "claim_fees" &&
         config.management.autoSwapAfterClaim &&

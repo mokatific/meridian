@@ -179,7 +179,13 @@ export async function recordPerformance(perf) {
   // Evolve thresholds every 5 closed positions
   if (data.performance.length % MIN_EVOLVE_POSITIONS === 0) {
     const { config, reloadScreeningThresholds } = await import("./config.js");
-    const result = evolveThresholds(data.performance, config);
+    // In live mode, exclude virtual (dry run) data from evolution
+    const livePerf =
+      process.env.DRY_RUN === "true"
+        ? data.performance
+        : data.performance.filter((x) => !x.virtual);
+    const result =
+      livePerf.length >= MIN_EVOLVE_POSITIONS ? evolveThresholds(livePerf, config) : null;
     if (result?.changes && Object.keys(result.changes).length > 0) {
       reloadScreeningThresholds();
       log("evolve", `Auto-evolved thresholds: ${JSON.stringify(result.changes)}`);
@@ -188,7 +194,7 @@ export async function recordPerformance(perf) {
     // Darwinian signal weight recalculation
     if (config.darwin?.enabled) {
       const { recalculateWeights } = await import("./signal-weights.js");
-      const wResult = recalculateWeights(data.performance, config);
+      const wResult = recalculateWeights(livePerf, config);
       if (wResult.changes.length > 0) {
         log("evolve", `Darwin: adjusted ${wResult.changes.length} signal weight(s)`);
       }
@@ -196,11 +202,11 @@ export async function recordPerformance(perf) {
 
     // Causal analysis — find WHY positions win or lose
     const { runCausalAnalysis } = await import("./causal-analysis.js");
-    const causalResult = runCausalAnalysis(data.performance);
+    const causalResult = runCausalAnalysis(livePerf);
     if (causalResult.lessons_added > 0) {
       log(
         "causal",
-        `Added ${causalResult.lessons_added} causal lesson(s) from ${data.performance.length} closes`,
+        `Added ${causalResult.lessons_added} causal lesson(s) from ${livePerf.length} closes`,
       );
     }
   }
@@ -775,11 +781,19 @@ function fmt(lessons) {
  * @param {number} [opts.hours=24]   - How many hours back to look
  * @param {number} [opts.limit=50]   - Max records to return
  */
-export function getPerformanceHistory({ hours = 24, limit = 50 } = {}) {
+export function getPerformanceHistory({ hours = 24, limit = 50, mode } = {}) {
   const data = load();
-  const p = data.performance;
+  let p = data.performance;
 
-  if (p.length === 0) return { positions: [], count: 0, hours };
+  // Filter virtual in live mode (consistent with getPerformanceSummary)
+  const effectiveMode = mode || (process.env.DRY_RUN === "true" ? "all" : "live");
+  if (effectiveMode === "live") {
+    p = p.filter((x) => !x.virtual);
+  } else if (effectiveMode === "virtual") {
+    p = p.filter((x) => x.virtual);
+  }
+
+  if (p.length === 0) return { positions: [], count: 0, hours, mode: effectiveMode };
 
   const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 
@@ -813,10 +827,24 @@ export function getPerformanceHistory({ hours = 24, limit = 50 } = {}) {
 
 /**
  * Get performance stats summary.
+ * @param {Object} [options]
+ * @param {string} [options.mode='auto'] - 'auto': live mode excludes virtual, dry run includes all
+ *                                         'live': exclude virtual records
+ *                                         'virtual': only virtual records
+ *                                         'all': include everything
  */
-export function getPerformanceSummary() {
+export function getPerformanceSummary(options = {}) {
+  const mode = options.mode || "auto";
   const data = load();
-  const p = data.performance;
+  let p = data.performance;
+
+  // Filter based on mode
+  if (mode === "live" || (mode === "auto" && process.env.DRY_RUN !== "true")) {
+    p = p.filter((x) => !x.virtual);
+  } else if (mode === "virtual") {
+    p = p.filter((x) => x.virtual);
+  }
+  // mode='all' or mode='auto' + dry run → no filter
 
   if (p.length === 0) return null;
 
@@ -836,5 +864,6 @@ export function getPerformanceSummary() {
       return denom > 0 ? Math.round((wins / denom) * 100) : 0;
     })(),
     total_lessons: data.lessons.length,
+    mode: mode === "auto" ? (process.env.DRY_RUN === "true" ? "all" : "live") : mode,
   };
 }

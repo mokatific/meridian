@@ -124,4 +124,4 @@ export function encryptEnvRaw({
   return { rawPath, outPath };
 }
 
-loadEnv();
+loadEnv({ override: true });

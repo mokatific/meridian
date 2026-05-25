@@ -34,7 +34,7 @@ Thumbs.db
 user-config.json
 
 # ============================================
-# Logs
+# Runtime state
 # ============================================
 state.json
 lessons.json
@@ -45,6 +45,7 @@ strategy-library.json
 decision-log.json
 hivemind-cache.json
 signal-weights.json
+skipped-pools.json
 
 # ============================================
 # Logs
@@ -89,6 +90,9 @@ telegram-history/*
 # ============================================
 virtual-positions.json
 causal-analysis.json
+position-journal.db
+position-journal.db-shm
+position-journal.db-wal
 
 # ============================================
 # Python

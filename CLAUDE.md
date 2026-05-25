@@ -239,41 +239,41 @@ Agent Meridian HiveMind sync is handled by `hivemind.js`. It uses built-in Agent
 
 `utils/lessonManager.js`:
 
-- `initializeLessonScore(lesson, outcome)` — assign initial score
-- `applyPerformanceFeedback(perf)` — update lesson score based on next position outcome
-- `pruneLessons()` — automatically remove low/old lesson scores
-- `runMaintenance()` — call periodically (every ~8 closes)
+- `initializeLessonScore(lesson, outcome)` — initialize lesson score
+- `applyPerformanceFeedback(perf)` — update lesson score based on subsequent position outcomes
+- `pruneLessons()` — automatically remove low/old scoring lessons
+- `runMaintenance()` — run periodically (every ~8 closes)
 
-Integration already exists in `lessons.js` (`recordPerformance`). Lessons now have a feedback loop → they become "smarter" over time (consistent with Swarm Intelligence concept).
+Integration exists in `lessons.js` (`recordPerformance`). Lessons now have a feedback loop and improve over time (Swarm Intelligence-style).
 
 ---
 
 ## DRY_RUN Mode
 
-`DRY_RUN=true` in `.env` or via `yarn dev` (automatically set).
+`DRY_RUN=true` in `.env` or via `yarn dev` (recommended for testing).
 
-**Principle:** All on-chain operations that send real transactions are blocked — instead they return an object `{ dry_run: true, would_..., message: "DRY RUN — no transaction sent" }`.
+**Principle:** All on-chain operations that would send real transactions are blocked — instead the tool returns an object like `{ dry_run: true, would_..., message: "DRY RUN — no transaction sent" }`.
 
-### Operations blocked during DRY_RUN
+### Operations blocked in DRY_RUN
 
-| Location              | Function          | Skipped behavior                                              |
-| --------------------- | ----------------- | ------------------------------------------------------------- |
-| `tools/dlmm.js:573`   | `addLiquidity()`  | No TX sent, returns position details that _would_ be deployed |
-| `tools/dlmm.js:1460`  | `claimFees()`     | Does not claim fees                                           |
-| `tools/dlmm.js:1506`  | `closePosition()` | Does not close position                                       |
-| `tools/wallet.js:153` | `swapToken()`     | Does not swap tokens                                          |
+| Location              | Function          | Blocked behavior                                                        |
+| --------------------- | ----------------- | ----------------------------------------------------------------------- |
+| `tools/dlmm.js:573`   | `addLiquidity()`  | Do not send TX; return details of the position that _would_ be deployed |
+| `tools/dlmm.js:1460`  | `claimFees()`     | Do not claim fees                                                       |
+| `tools/dlmm.js:1506`  | `closePosition()` | Do not close positions                                                  |
+| `tools/wallet.js:153` | `swapToken()`     | Do not perform swaps                                                    |
 
-### Still running during DRY_RUN
+### What still runs in DRY_RUN
 
-- **Screening** — pool scanning remains active (`index.js:406-407` — SOL balance check is skipped)
-- **Balance check** in executor is skipped (`executor.js:793`) — so no SOL needed
-- **Analysis & decision-making** — agent can still evaluate pools, calculate ranges, etc.
-- **HiveMind** — reports `dryRun: true` status to central (`hivemind.js:181`)
+- **Screening** — pool discovery remains active (balance checks skipped)
+- **Balance checks** in executor are skipped so a wallet with zero SOL can still run
+- **Analysis & decision-making** — the agent can evaluate pools, compute ranges, etc.
+- **HiveMind** — reports `dryRun: true` to the central service
 
 ### Startup log
 
 ```
-index.js:45 → logs "Mode: DRY RUN" or "Mode: LIVE"
+index.js:45 → log "Mode: DRY RUN" or "Mode: LIVE"
 ```
 
-**Conclusion:** DRY_RUN mode is safe for testing — the agent runs fully (screening, analysis, decision) but no on-chain transactions are sent.
+**Conclusion:** DRY_RUN mode is safe for testing — the full agent (screening, analysis, decision) runs, but no on-chain transactions are sent.
