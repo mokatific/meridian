@@ -60,6 +60,18 @@ The agent is powered via **OpenRouter** or other compatible providers and models
 
 ## Setup
 
+### 0. One-script VPS setup (recommended)
+
+Supported OS: Ubuntu 20.04+, Debian 11+, AlmaLinux/Rocky Linux 8+.
+
+```bash
+git clone https://github.com/mokatific/meridian.git
+cd meridian
+bash install.sh
+```
+
+The installer sets up system packages, mise, Node/Yarn, project dependencies, and optionally runs `yarn setup`.
+
 ### 1. Clone and install
 
 ```bash
