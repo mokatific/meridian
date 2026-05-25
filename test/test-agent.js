@@ -12,7 +12,7 @@ async function main() {
 
   const result = await agentLoop(
     "Run get_top_candidates. Then deploy_position into the #1 candidate using 0.1 SOL. Report what was deployed.",
-    5
+    5,
   );
 
   console.log("\n=== Agent Response ===");
