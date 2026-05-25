@@ -30,9 +30,7 @@ const SIGNALS_FILE = path.join(ROOT, "discord-signals.json");
 const SOL_ADDR_RE = /[1-9A-HJ-NP-Za-km-z]{32,44}/g;
 
 // Known non-address patterns to skip (short common words that match base58 range)
-const FALSE_POSITIVE_SKIP = new Set([
-  "solana", "meteora", "jupiter", "raydium", "orca",
-]);
+const FALSE_POSITIVE_SKIP = new Set(["solana", "meteora", "jupiter", "raydium", "orca"]);
 
 function isLikelySolanaAddress(str) {
   if (str.length < 32 || str.length > 44) return false;
@@ -44,7 +42,11 @@ function isLikelySolanaAddress(str) {
 
 function loadSignals() {
   if (!fs.existsSync(SIGNALS_FILE)) return [];
-  try { return JSON.parse(fs.readFileSync(SIGNALS_FILE, "utf8")); } catch { return []; }
+  try {
+    return JSON.parse(fs.readFileSync(SIGNALS_FILE, "utf8"));
+  } catch {
+    return [];
+  }
 }
 
 function saveSignal(record) {
@@ -85,7 +87,10 @@ async function processAddress(address, message) {
 
 const TOKEN = process.env.DISCORD_USER_TOKEN;
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
-const CHANNEL_IDS = (process.env.DISCORD_CHANNEL_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
+const CHANNEL_IDS = (process.env.DISCORD_CHANNEL_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 if (!TOKEN) {
   console.error("ERROR: DISCORD_USER_TOKEN not set in ../.env");
@@ -109,7 +114,7 @@ client.on("ready", () => {
     console.warn(`WARNING: Guild ${GUILD_ID} not found in cache. Check DISCORD_GUILD_ID.`);
   } else {
     console.log(`Watching guild: ${guild.name}`);
-    const channelNames = CHANNEL_IDS.map(id => {
+    const channelNames = CHANNEL_IDS.map((id) => {
       const ch = guild.channels.cache.get(id);
       return ch ? `#${ch.name}` : `#${id} (not found)`;
     });
@@ -128,15 +133,18 @@ client.on("messageCreate", async (message) => {
   if (message.author?.username !== "Metlex Pool Bot") return;
 
   const content = message.content || "";
-  const embeds = message.embeds?.map(e => `${e.title || ""} ${e.description || ""}`).join(" ") || "";
+  const embeds =
+    message.embeds?.map((e) => `${e.title || ""} ${e.description || ""}`).join(" ") || "";
   const fullText = `${content} ${embeds}`;
 
-  const matches = [...fullText.matchAll(SOL_ADDR_RE)].map(m => m[0]);
+  const matches = [...fullText.matchAll(SOL_ADDR_RE)].map((m) => m[0]);
   const unique = [...new Set(matches)].filter(isLikelySolanaAddress);
 
   if (unique.length === 0) return;
 
-  console.log(`\n[message] @${message.author?.username} in #${message.channel?.name}: "${content.slice(0, 80)}"`);
+  console.log(
+    `\n[message] @${message.author?.username} in #${message.channel?.name}: "${content.slice(0, 80)}"`,
+  );
   console.log(`  Addresses found: ${unique.join(", ")}`);
 
   // Process each address independently (don't await — handle concurrently but logged sequentially)
