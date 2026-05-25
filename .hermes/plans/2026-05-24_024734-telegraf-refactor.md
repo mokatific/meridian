@@ -2,16 +2,16 @@
 
 ## Goal
 
-Refactor Meridian's Telegram layer dari custom polling + monolithic `index.js` (2200+ lines) ke Telegraf framework. Hasilnya: modular, maintainable, extensible — tanpa mengubah core logic (agent, screening, management, lessons).
+Refactor Meridian's Telegram layer from custom polling + monolithic `index.js` (2200+ lines) onto the Telegraf framework. Result: modular, maintainable, extensible — without touching core logic (agent, screening, management, lessons).
 
 ## Current State
 
 - `telegram.js` (494 lines) — low-level wrapper: sendMessage, editMessage, polling loop, notification helpers
 - `index.js` (2247 lines) — EVERYTHING else: command routing (20+ commands), callback query dispatch (30+ inline buttons), cron orchestration, screening/management cycles, menu system, settings UI
-- Polling: custom `getUpdates` loop di `telegram.js:363-421`
+- Polling: custom `getUpdates` loop in `telegram.js:363-421`
 - Auth: manual `isAuthorizedIncomingMessage()` check
 - Command routing: giant if/else chain (~400 lines)
-- Callback routing: regex matching di satu function (~200 lines)
+- Callback routing: regex matching inside one function (~200 lines)
 - No session, no middleware, no scene
 - `setMyCommands` not called — command popup requires BotFather manual setup
 

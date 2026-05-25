@@ -7,29 +7,42 @@ Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 ## Architecture Overview
 
 ```
-index.js            Main entry: REPL + cron orchestration + Telegram bot polling
-agent.js            ReAct loop (OpenRouter/OpenAI-compatible): LLM → tool call → repeat
-config.js           Runtime config from user-config.json + .env; exposes config object
-prompt.js           Builds system prompt per agent role (SCREENER / MANAGER / GENERAL)
-state.js            Position registry (state.json): tracks bin ranges, OOR timestamps, notes
-lessons.js          Learning engine: records closed-position perf, derives lessons, evolves thresholds
-pool-memory.js      Per-pool deploy history + snapshots (pool-memory.json)
-strategy-library.js Saved LP strategies (strategy-library.json)
-briefing.js         Daily Telegram briefing (HTML)
-telegram.js         Telegram bot: polling, notifications (deploy/close/swap/OOR)
-hivemind.js         Agent Meridian HiveMind sync
-smart-wallets.js    KOL/alpha wallet tracker (smart-wallets.json)
-token-blacklist.js  Permanent token blacklist (token-blacklist.json)
-logger.js           Daily-rotating log files + action audit trail
+index.js              Main entry: REPL + cron orchestration + Telegram bot polling
+agent.js              ReAct loop (OpenRouter/OpenAI-compatible): LLM → tool call → repeat
+config.js             Runtime config from user-config.json + .env; exposes config object
+prompt.js             Builds system prompt per agent role (SCREENER / MANAGER / GENERAL)
+state.js              Position registry (state.json): tracks bin ranges, OOR timestamps, notes
+decision-log.js       Structured decision log (deploy, close, skip, no-deploy) — fed back into prompts
+lessons.js            Learning engine: records closed-position perf, derives lessons, evolves thresholds
+pool-memory.js        Per-pool deploy history + snapshots (pool-memory.json)
+strategy-library.js   Saved LP strategies (strategy-library.json)
+paper-positions.js    Live forward-running paper LP positions (paper-positions.json) — ticked every 5m
+dry-run-simulator.js  DRY_RUN-mode virtual position tracker used by the management cron
+wallet-evolution.js   Auto-discovery + pruning of smart wallets
+briefing.js           Daily Telegram briefing (HTML)
+telegram.js           Telegram bot: polling, notifications (deploy/close/swap/OOR)
+hivemind.js           Agent Meridian HiveMind sync
+smart-wallets.js      KOL/alpha wallet tracker (smart-wallets.json)
+token-blacklist.js    Permanent token blacklist (token-blacklist.json)
+dev-blocklist.js      Blocked deployer wallets (deployer-blacklist.json)
+causal-analysis.js    Auto-analysis of WHY closed positions won or lost (causal-analysis.json)
+signal-weights.js     Darwin signal-weight learning (signal-weights.json)
+skipped-tracker.js    Missed-opportunity tracker (skipped-pools.json)
+position-logger.js    Append-only audit trail (position-journal.db, SQLite)
+logger.js             Daily-rotating log files + action audit trail
+cli.js                CLI surface — each tool exposed as a subcommand with JSON output
 
 tools/
-  definitions.js    Tool schemas in OpenAI format (what LLM sees)
-  executor.js       Tool dispatch: name → fn, safety checks, pre/post hooks
-  dlmm.js           Meteora DLMM SDK wrapper (deploy, close, claim, positions, PnL)
-  screening.js      Pool discovery from Meteora API
-  wallet.js         SOL/token balances (Helius) + Jupiter swap
-  token.js          Token info/holders/narrative (Jupiter API)
-  study.js          Top LPer study via LPAgent API
+  definitions.js      Tool schemas in OpenAI format (what LLM sees)
+  executor.js         Tool dispatch: name → fn, safety checks, pre/post hooks
+  dlmm.js             Meteora DLMM SDK wrapper (deploy, close, claim, positions, PnL)
+  screening.js        Pool discovery from Meteora API
+  wallet.js           SOL/token balances (Helius) + Jupiter swap
+  token.js            Token info/holders/narrative (Jupiter API)
+  study.js            Top LPer study via LPAgent API
+  simulator.js        Thin wrappers over paper-positions.js (open/get/close/list)
+  chart-indicators.js RSI/Bollinger/Supertrend/Fibonacci preset evaluation
+  agent-meridian.js   Helper for the Agent Meridian relay API
 ```
 
 ---
@@ -157,6 +170,53 @@ Progress bar format: `[████████░░░░░░░░░░░
 
 ---
 
+## Cron Jobs (index.js → startCronJobs)
+
+| Cron pattern       | Task               | Purpose                                                                                            |
+| ------------------ | ------------------ | -------------------------------------------------------------------------------------------------- |
+| `*/managementInt`  | `mgmtTask`         | Run a MANAGER cycle: list positions, claim/close/hold decisions                                    |
+| `*/screeningInt`   | `screenTask`       | Run a SCREENER cycle: pull candidates, decide whether to deploy                                    |
+| `0 * * * *`        | `healthTask`       | Hourly health-check chat                                                                           |
+| `0 1 * * *` (UTC)  | `briefingTask`     | Morning briefing (08:00 UTC+7 = 01:00 UTC)                                                         |
+| `0 */6 * * *`      | `briefingWatchdog` | Catch up a missed briefing (process restart, crash)                                                |
+| `0 */2 * * *`      | `walletEvoTask`    | Auto-discover and prune smart wallets from top trending pools                                      |
+| `*/5 * * * *`      | `paperTickTask`    | Tick every open paper position: fetch new candles, accrue fees, recompute IL (no LLM, no on-chain) |
+| `setInterval(30s)` | `pnlPollInterval`  | Lightweight PnL poll for trailing-TP / deterministic close triggers between management cycles      |
+
+All cron tasks are pushed into the module-level `_cronTasks` array and torn down by `stopCronJobs()`. `_managementBusy` / `_screeningBusy` / `_paperTickBusy` flags guard against overlapping runs. Interval crons (`managementIntervalMin`, `screeningIntervalMin`) restart automatically when `update_config` changes their values — handled by `registerCronRestarter()` in executor.js.
+
+---
+
+## Paper Positions (paper-positions.js)
+
+Forward-running simulated LP positions that accrue real fees and IL using GeckoTerminal 5m OHLCV. No on-chain calls. Persisted to `paper-positions.json` so positions survive restarts.
+
+**Files involved**
+
+- `paper-positions.js` — core (open, tick, get, close, list, formatSummary)
+- `tools/simulator.js` — thin wrappers + re-exports `tickPaperPositions`
+- `tools/definitions.js` — 4 tool schemas: `open_paper_position`, `get_paper_position`, `close_paper_position`, `list_paper_positions`
+- `tools/executor.js` — registered in `toolMap`
+- `agent.js` — included in `MANAGER_TOOLS` and `SCREENER_TOOLS`
+- `index.js` — `*/5 * * * *` cron drives `tickPaperPositions()` each cycle
+
+**Math**
+
+- **Sqrt-price geometry** (Uniswap v3 style): given total deposit value, active price, lower/upper price, compute liquidity `L` and the initial X/Y split. Single-side SOL at `active == upper` is the natural degenerate case (all Y).
+- **Price scale normalization**: at open time, fetch one candle close from GeckoTerminal and divide by datapi's `current_price`. Token-decimal differences across feeds can cause ~1000× mismatches. The scale is stored on the position; all bounds are derived in the OHLCV scale so subsequent tick prices compare directly.
+- **Fee accrual per candle**: when `[candle.low, candle.high]` intersects `[lower_price, upper_price]`, fees += `volume × (fee_pct/100) × tvl_share × in_range_fraction`. `tvl_share` is computed once at open: `initial_value_usd / (pool_tvl + initial_value_usd)`.
+- **IL formula**: `IL_ratio = (2√r / (1+r) - 1) × √(upper/lower)` with `r = effective_price / entry_price`, `effective_price` clamped to `[lower, upper]`. This replaces a previous USD-rebalance formula that always summed to the deposit amount for single-side SOL deploys (silently reported 0 IL). Multiply by `initial_value_usd` for USD.
+
+**Public API**
+
+- `openPaperPosition({ pool_address, amount_sol, bins_below, bins_above?, strategy?, sol_price_usd?, note? })` — returns `formatSummary(pos)` including the position `id`.
+- `tickPaperPositions()` — pulls new candles since each position's `last_candle_timestamp`, updates state, returns per-position deltas.
+- `getPaperPosition({ id })` — adds `annualized_fee_apr_pct` + `age_hours`.
+- `closePaperPosition({ id, reason? })` — flips status to `closed`, freezes accrual.
+- `listPaperPositions({ status? })` — filter by `'open'` / `'closed'` or omit for all.
+
+---
+
 ## Bundler Detection (token.js)
 
 Two signals used in `getTokenHolders()`:
@@ -186,10 +246,12 @@ const actualBaseFee =
 ## Model Configuration
 
 - Default model: `process.env.LLM_MODEL` or `openrouter/healer-alpha`
-- Fallback on 502/503/529: `stepfun/step-3.5-flash:free` (2nd attempt), then retry
+- Fallback on 502/503/529: `deepseek-flash-combo` (constant `FALLBACK_MODEL` in agent.js), then retry with exponential backoff
+- Optional fallback **endpoint**: set `LLM_FALLBACK_BASE_URL` + `LLM_FALLBACK_API_KEY` and `LLM_ENABLE_FALLBACK_SWITCHING=true`. Useful when running through SwiftRouter and you want to fail over to OpenRouter on outages.
 - Per-role models: `managementModel`, `screeningModel`, `generalModel` in user-config.json
 - LM Studio: set `LLM_BASE_URL=http://localhost:1234/v1` and `LLM_API_KEY=lm-studio`
 - `maxOutputTokens` minimum: 2048 (free models may have lower limits causing empty responses)
+- Reasoning models that emit `reasoning_content`: the SDK custom fetch in agent.js strips SDK-style headers (so 9router doesn't redact reasoning) and promotes `reasoning_content` to `content` when content is empty, so tool calls still parse.
 
 ---
 
@@ -212,19 +274,29 @@ Agent Meridian HiveMind sync is handled by `hivemind.js`. It uses built-in Agent
 
 ## Environment Variables
 
-| Var                  | Required | Purpose                                 |
-| -------------------- | -------- | --------------------------------------- |
-| `WALLET_PRIVATE_KEY` | Yes      | Base58 or JSON array private key        |
-| `RPC_URL`            | Yes      | Solana RPC endpoint                     |
-| `OPENROUTER_API_KEY` | Yes      | LLM API key                             |
-| `TELEGRAM_BOT_TOKEN` | No       | Telegram notifications                  |
-| `TELEGRAM_CHAT_ID`   | No       | Telegram chat target                    |
-| `LLM_BASE_URL`       | No       | Override for local LLM (e.g. LM Studio) |
-| `LLM_MODEL`          | No       | Override default model                  |
-| `DRY_RUN`            | No       | Skip all on-chain transactions          |
-| `HIVE_MIND_URL`      | No       | Collective intelligence server          |
-| `HIVE_MIND_API_KEY`  | No       | Hive mind auth token                    |
-| `HELIUS_API_KEY`     | No       | Enhanced wallet balance data            |
+| Var                             | Required | Purpose                                                                |
+| ------------------------------- | -------- | ---------------------------------------------------------------------- |
+| `WALLET_PRIVATE_KEY`            | Yes      | Base58 or JSON array private key                                       |
+| `RPC_URL`                       | Yes      | Solana RPC endpoint                                                    |
+| `OPENROUTER_API_KEY`            | Yes      | LLM API key (or `LLM_API_KEY` for OpenAI-compatible endpoints)         |
+| `TELEGRAM_BOT_TOKEN`            | No       | Telegram notifications                                                 |
+| `TELEGRAM_CHAT_ID`              | No       | Telegram chat target                                                   |
+| `TELEGRAM_ALLOWED_USER_IDS`     | No       | Comma-separated user ids allowed to send commands                      |
+| `LLM_BASE_URL`                  | No       | Override for primary LLM endpoint (e.g. LM Studio, SwiftRouter)        |
+| `LLM_API_KEY`                   | No       | Override for `OPENROUTER_API_KEY` when using a non-OpenRouter endpoint |
+| `LLM_MODEL`                     | No       | Override default model                                                 |
+| `LLM_FALLBACK_BASE_URL`         | No       | Secondary endpoint for transient-error fallback                        |
+| `LLM_FALLBACK_API_KEY`          | No       | Auth key for the fallback endpoint                                     |
+| `LLM_ENABLE_FALLBACK_SWITCHING` | No       | `true` to enable endpoint failover on 5xx / timeouts                   |
+| `DRY_RUN`                       | No       | Skip all on-chain transactions                                         |
+| `ALLOW_SELF_UPDATE`             | No       | `true` to allow `self_update` tool (requires interactive TTY)          |
+| `HIVE_MIND_URL`                 | No       | Collective intelligence server                                         |
+| `HIVE_MIND_API_KEY`             | No       | Hive mind auth token                                                   |
+| `HELIUS_API_KEY`                | No       | Enhanced wallet balance data                                           |
+| `DISCORD_USER_TOKEN`            | No       | Selfbot token for `discord-listener/` signal pipeline                  |
+| `DISCORD_GUILD_ID`              | No       | Discord server id for the listener                                     |
+| `DISCORD_CHANNEL_IDS`           | No       | Comma-separated channel ids to watch                                   |
+| `DISCORD_MIN_FEES_SOL`          | No       | Skip pools with all-time fees below this threshold                     |
 
 ---
 
@@ -277,3 +349,24 @@ index.js:45 → log "Mode: DRY RUN" or "Mode: LIVE"
 ```
 
 **Conclusion:** DRY_RUN mode is safe for testing — the full agent (screening, analysis, decision) runs, but no on-chain transactions are sent.
+
+---
+
+## Tooling / Workflow Notes
+
+### Lefthook + Prettier
+
+`lefthook.yml` runs `yarn prettier --write {staged_files}` on pre-commit with `stage_fixed: true`. Without `stage_fixed`, prettier's reformatted files stay unstaged and the commit captures the un-formatted version — leaving an unstaged diff after every commit. Keep `stage_fixed: true` on any formatter job.
+
+### Git conventions
+
+- Use Conventional Commits where natural (`feat:`, `fix:`, `chore:`, `refactor:`). One-line subject + multi-line body.
+- The repo's `git user.email` is the project's own email — don't add additional co-author trailers unless explicitly asked.
+
+### CodeGraph (optional)
+
+`.codegraph/` (if present) is a tree-sitter symbol index. The CodeGraph MCP tools (`codegraph_*`) are faster than grep for structural lookups (where is X defined, what calls Y, etc.). They are not required to run the agent.
+
+### Persistent state files (all .gitignored)
+
+`state.json`, `lessons.json`, `pool-memory.json`, `paper-positions.json`, `smart-wallets.json`, `token-blacklist.json`, `strategy-library.json`, `decision-log.json`, `hivemind-cache.json`, `signal-weights.json`, `skipped-pools.json`, `virtual-positions.json`, `causal-analysis.json`, `position-journal.db*`, `discord-signals.json`, `deployer-blacklist.json`. Treat these as runtime caches — code must tolerate them being missing or corrupted.

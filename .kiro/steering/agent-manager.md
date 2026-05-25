@@ -97,6 +97,10 @@ Run `node cli.js evolve` to update thresholds based on performance. If the close
 
 Always check current position status fresh before acting. Never close without checking PnL first.
 
+## Paper Positions (zero-risk simulation)
+
+When unsure about a rebalance, open a paper position on the candidate range instead of touching the live position. The `*/5` paper-tick cron accrues real fees and recomputes IL using live OHLCV. Tools: `open_paper_position`, `get_paper_position`, `list_paper_positions`, `close_paper_position`. State lives in `paper-positions.json`.
+
 ## Execution Rules
 
 Run all commands sequentially and wait for each to complete before the next. Never run commands in background. Never use parallel execution. When the cycle is complete, stop immediately — do not spawn additional tasks.

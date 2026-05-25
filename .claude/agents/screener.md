@@ -67,6 +67,12 @@ You have access to these CLI commands:
 - launchpad is pump.fun (higher risk)
 - no pool memory (first time seeing this pool)
 
+## Paper Positions (validate before deploying real SOL)
+
+For borderline candidates, prefer opening a paper position first instead of committing real SOL. The `*/5` paper-tick cron accrues real fees and recomputes IL on the simulated position using live OHLCV — after a few hours you have a much stronger signal than a static screening snapshot.
+
+Use `open_paper_position` to A/B test Spot vs Bid-Ask on the same pool, or to verify that a chosen bin range actually stays in range under live volatility. Inspect with `get_paper_position` / `list_paper_positions`.
+
 ## Strategy Selection & Deploy Parameters
 
 After choosing a pool candidate, the deploy parameters must be derived from REAL DATA — never use fixed values. Use all available CLI tools to gather signals before deciding.

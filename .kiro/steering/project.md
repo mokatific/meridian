@@ -11,29 +11,38 @@ Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 ## Architecture Overview
 
 ```
-index.js            Main entry: REPL + cron orchestration + Telegram bot polling
-agent.js            ReAct loop (OpenRouter/OpenAI-compatible): LLM → tool call → repeat
-config.js           Runtime config from user-config.json + .env; exposes config object
-prompt.js           Builds system prompt per agent role (SCREENER / MANAGER / GENERAL)
-state.js            Position registry (state.json): tracks bin ranges, OOR timestamps, notes
-lessons.js          Learning engine: records closed-position perf, derives lessons, evolves thresholds
-pool-memory.js      Per-pool deploy history + snapshots (pool-memory.json)
-strategy-library.js Saved LP strategies (strategy-library.json)
-briefing.js         Daily Telegram briefing (HTML)
-telegram.js         Telegram bot: polling, notifications (deploy/close/swap/OOR)
-hivemind.js         Agent Meridian HiveMind sync
-smart-wallets.js    KOL/alpha wallet tracker (smart-wallets.json)
-token-blacklist.js  Permanent token blacklist (token-blacklist.json)
-logger.js           Daily-rotating log files + action audit trail
+index.js              Main entry: REPL + cron orchestration + Telegram bot polling
+agent.js              ReAct loop (OpenRouter/OpenAI-compatible): LLM → tool call → repeat
+config.js             Runtime config from user-config.json + .env; exposes config object
+prompt.js             Builds system prompt per agent role (SCREENER / MANAGER / GENERAL)
+state.js              Position registry (state.json): tracks bin ranges, OOR timestamps, notes
+decision-log.js       Structured decision log (deploy, close, skip, no-deploy) — fed back into prompts
+lessons.js            Learning engine: records closed-position perf, derives lessons, evolves thresholds
+pool-memory.js        Per-pool deploy history + snapshots (pool-memory.json)
+strategy-library.js   Saved LP strategies (strategy-library.json)
+paper-positions.js    Live forward-running paper LP positions (paper-positions.json) — ticked every 5m
+dry-run-simulator.js  DRY_RUN-mode virtual position tracker used by the management cron
+wallet-evolution.js   Auto-discovery + pruning of smart wallets
+briefing.js           Daily Telegram briefing (HTML)
+telegram.js           Telegram bot: polling, notifications (deploy/close/swap/OOR)
+hivemind.js           Agent Meridian HiveMind sync
+smart-wallets.js      KOL/alpha wallet tracker (smart-wallets.json)
+token-blacklist.js    Permanent token blacklist (token-blacklist.json)
+dev-blocklist.js      Blocked deployer wallets (deployer-blacklist.json)
+causal-analysis.js    Auto-analysis of WHY closed positions won or lost (causal-analysis.json)
+logger.js             Daily-rotating log files + action audit trail
+cli.js                CLI surface — each tool exposed as a subcommand with JSON output
 
 tools/
-  definitions.js    Tool schemas in OpenAI format (what LLM sees)
-  executor.js       Tool dispatch: name → fn, safety checks, pre/post hooks
-  dlmm.js           Meteora DLMM SDK wrapper (deploy, close, claim, positions, PnL)
-  screening.js      Pool discovery from Meteora API
-  wallet.js         SOL/token balances (Helius) + Jupiter swap
-  token.js          Token info/holders/narrative (Jupiter API)
-  study.js          Top LPer study via LPAgent API
+  definitions.js      Tool schemas in OpenAI format (what LLM sees)
+  executor.js         Tool dispatch: name → fn, safety checks, pre/post hooks
+  dlmm.js             Meteora DLMM SDK wrapper (deploy, close, claim, positions, PnL)
+  screening.js        Pool discovery from Meteora API
+  wallet.js           SOL/token balances (Helius) + Jupiter swap
+  token.js            Token info/holders/narrative (Jupiter API)
+  study.js            Top LPer study via LPAgent API
+  simulator.js        Thin wrappers over paper-positions.js (open/get/close/list)
+  chart-indicators.js RSI/Bollinger/Supertrend/Fibonacci preset evaluation
 ```
 
 ---
@@ -158,6 +167,38 @@ Progress bar format: `[████████░░░░░░░░░░░
 ## Race Condition: Double Deploy
 
 `_screeningLastTriggered` in index.js prevents concurrent screener invocations. Management cycle sets this before triggering screener. Also, `deploy_position` safety check uses `force: true` on `getMyPositions()` for a fresh count.
+
+---
+
+## Cron Jobs (index.js → startCronJobs)
+
+| Cron pattern       | Task               | Purpose                                                                                            |
+| ------------------ | ------------------ | -------------------------------------------------------------------------------------------------- |
+| `*/managementInt`  | `mgmtTask`         | Run a MANAGER cycle: list positions, claim/close/hold decisions                                    |
+| `*/screeningInt`   | `screenTask`       | Run a SCREENER cycle: pull candidates, decide whether to deploy                                    |
+| `0 * * * *`        | `healthTask`       | Hourly health-check chat                                                                           |
+| `0 1 * * *` (UTC)  | `briefingTask`     | Morning briefing (08:00 UTC+7 = 01:00 UTC)                                                         |
+| `0 */6 * * *`      | `briefingWatchdog` | Catch up a missed briefing (process restart, crash)                                                |
+| `0 */2 * * *`      | `walletEvoTask`    | Auto-discover and prune smart wallets from top trending pools                                      |
+| `*/5 * * * *`      | `paperTickTask`    | Tick every open paper position: fetch new candles, accrue fees, recompute IL (no LLM, no on-chain) |
+| `setInterval(30s)` | `pnlPollInterval`  | Lightweight PnL poll for trailing-TP / deterministic close triggers between management cycles      |
+
+All cron tasks are pushed into the module-level `_cronTasks` array and torn down by `stopCronJobs()`. `_managementBusy` / `_screeningBusy` / `_paperTickBusy` flags guard against overlapping runs. Interval crons restart automatically when `update_config` changes their values (`registerCronRestarter()` in executor.js).
+
+---
+
+## Paper Positions (paper-positions.js)
+
+Forward-running simulated LP positions that accrue real fees and IL using GeckoTerminal 5m OHLCV. No on-chain calls. Persisted to `paper-positions.json` so positions survive restarts.
+
+Four tools are exposed to the agent: `open_paper_position`, `get_paper_position`, `close_paper_position`, `list_paper_positions`. All four are in MANAGER_TOOLS and SCREENER_TOOLS, and also reachable from the GENERAL chat.
+
+**Math**
+
+- **Sqrt-price geometry** computes the initial X/Y split. Single-side SOL (active == upper) starts as all Y.
+- **Price scale normalization** at open: ratio between datapi's `current_price` and one GeckoTerminal candle close is stored as `price_scale`. All stored bounds live in OHLCV scale so ticks compare directly. Without this, ~1000× token-decimal mismatches silently broke IL.
+- **Fee accrual**: when `[candle.low, candle.high]` intersects `[lower, upper]`, fees += `volume × (fee_pct/100) × tvl_share × in_range_fraction`.
+- **IL formula**: `IL_ratio = (2√r/(1+r) − 1) × √(upper/lower)`, where `r = effective_price / entry_price`, `effective_price` clamped to `[lower, upper]`. Multiply by `initial_value_usd` for USD.
 
 ---
 

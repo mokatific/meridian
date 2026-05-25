@@ -14,7 +14,9 @@ Meridian runs a continuous screening and management loop — deploying capital i
 - **Position management** — monitors, claims fees, and closes LP positions autonomously; decides STAY, CLOSE, or REDEPLOY based on live data
 - **Performance-driven learning** — studies top LPers in target pools, stores structured lessons, and adjusts screening thresholds based on closed-position history
 - **Smart wallet evolution** — automatically discovers high-quality LP wallets from study data, auto-adds strong wallets, and prunes poor performers
+- **Paper position tracker** — open zero-risk LP positions on a real pool with one tool call. A dedicated `*/5 * * * *` cron ticks every open paper position against live 5m OHLCV, accruing fees (volume × fee rate × TVL share, in-range only) and recomputing IL via sqrt-price geometry. State persists across restarts.
 - **Dry-run simulator** — demo mode: with `DRY_RUN=true` the agent tracks virtual positions using real market data, simulates PnL, and learns from virtual closes exactly like live positions
+- **Decision log** — every deploy / close / skip / no-deploy outcome is recorded with rationale, key risks, metrics, and rejected alternatives. Recent decisions are re-injected into the prompt so "why did you …?" questions answer from factual history, not memory.
 - **Discord signals** — optional Discord listener that watches LP Army channels for Solana token signals and queues them for screening
 - **Telegram chat & control** — full agent chat via Telegram, plus cycle reports and OOR alerts
 - **Kiro integration** — run AI-powered screening and management from the editor using steering files and hooks
@@ -537,6 +539,41 @@ All dry-run data (lessons, pool memory, blacklist, signal weights) is immediatel
 
 ---
 
+## Paper Positions
+
+Paper positions are forward-running simulated LP positions that accrue **real** fees and IL from live 5-minute OHLCV candles — no on-chain calls, no SOL committed. Use them to A/B test ideas (Spot vs Curve vs Bid-Ask), validate a pool over hours/days before deploying real capital, or shadow a live deploy to compare strategies.
+
+**How it works**
+
+1. `open_paper_position` snapshots the pool (active price, bin step, fee%, TVL) and computes the initial X/Y split via sqrt-price geometry. Single-side SOL deploys (where `active == upper`) correctly start as 100% Y.
+2. A dedicated `*/5 * * * *` cron calls `tickPaperPositions()` every 5 minutes. For each open paper position it fetches new candles from GeckoTerminal, accrues fees `volume × fee_rate × tvl_share × in_range_fraction` for in-range candles, and recomputes IL.
+3. State is persisted to `paper-positions.json` so positions survive process restarts.
+
+**IL formula**
+
+```
+IL = deposit × (2√r / (1 + r) − 1) × √(upper / lower)
+```
+
+where `r = effective_price / entry_price`, with `effective_price` clamped to `[lower, upper]` so excursions outside the range stop adding loss.
+
+**Price scale normalization**
+
+The DLMM data API and GeckoTerminal can disagree on absolute price by ~1000× because of token decimal differences. At open time the module fetches one candle close and stores a `price_scale` factor so all stored bounds live in the OHLCV scale — subsequent ticks compare cleanly.
+
+**Tools exposed to the agent**
+
+| Tool                   | Purpose                                                             |
+| ---------------------- | ------------------------------------------------------------------- |
+| `open_paper_position`  | Open a new paper position on a pool                                 |
+| `get_paper_position`   | Full current state (PnL, IL, fees, in-range %, annualized APR, age) |
+| `close_paper_position` | Mark closed — accrual stops, final snapshot preserved               |
+| `list_paper_positions` | Compact list filtered by `status` (`open` / `closed`) or all        |
+
+All four are available to both MANAGER and SCREENER roles, and via the GENERAL chat.
+
+---
+
 ## HiveMind
 
 HiveMind sync uses the Agent Meridian service at `https://api.agentmeridian.xyz` by default. Agents can register, pull shared lessons/presets, and push learning events without a separate registration flow.
@@ -583,12 +620,18 @@ decision-log.js       Structured decision log for deploy, close, skip, no-deploy
 lessons.js            Learning engine: record performance, derive lessons, evolve thresholds
 pool-memory.js        Per-pool deploy history + snapshots
 strategy-library.js   Saved LP strategies
+paper-positions.js    Live forward-running paper LP positions (5m tick)
 wallet-evolution.js   Auto-discovery and pruning of smart wallets
 dry-run-simulator.js  Demo account mode — virtual positions + learning pipeline during dry run
+causal-analysis.js    Auto-analysis of WHY closed positions won or lost
+signal-weights.js     Darwin signal-weight learning
+skipped-tracker.js    Missed-opportunity tracker
+position-logger.js    Append-only audit trail (SQLite)
 telegram.js           Telegram bot: polling + notifications
 hivemind.js           Agent Meridian HiveMind sync
 smart-wallets.js      KOL/alpha wallet tracker
 token-blacklist.js    Permanent token blacklist
+dev-blocklist.js      Blocked deployer wallets
 cli.js                CLI — each tool as a subcommand with JSON output
 
 tools/
@@ -599,6 +642,9 @@ tools/
   wallet.js           SOL/token balances + Jupiter swap
   token.js            Token info, holders, narrative
   study.js            Top-LPer study via LPAgent API
+  simulator.js        Thin wrappers over paper-positions.js
+  chart-indicators.js RSI/Bollinger/Supertrend/Fibonacci preset evaluation
+  agent-meridian.js   Helper for the Agent Meridian relay API
 
 discord-listener/
   index.js            Selfbot Discord listener
@@ -607,7 +653,28 @@ discord-listener/
 .kiro/
   steering/           Steering files for Kiro IDE
   hooks/              Automation hooks for Kiro IDE
+
+.claude/
+  settings.json       Claude Code settings
+  agents/             Manager + Screener agent definitions
+  commands/           Slash commands (/positions, /balance, /manage, /screen, /candidates, ...)
+
+.hermes/
+  plans/              Architectural plans (e.g. Telegram framework migration)
 ```
+
+### Cron jobs (live mode)
+
+| Cron pattern       | Task                | Purpose                                                                       |
+| ------------------ | ------------------- | ----------------------------------------------------------------------------- |
+| `*/managementInt`  | Management          | List positions, decide claim/close/hold                                       |
+| `*/screeningInt`   | Screening           | Pull candidates, decide whether to deploy                                     |
+| `0 * * * *`        | Health check        | Hourly portfolio + service health chat                                        |
+| `0 1 * * *`        | Morning briefing    | 08:00 UTC+7 daily summary (HTML)                                              |
+| `0 */6 * * *`      | Briefing watchdog   | Catch a missed briefing after restart                                         |
+| `0 */2 * * *`      | Wallet evolution    | Auto-discover and prune smart wallets from trending pools                     |
+| `*/5 * * * *`      | Paper-position tick | Accrue fees + recompute IL on every open paper position (no LLM, no on-chain) |
+| `setInterval(30s)` | PnL poller          | Lightweight trailing-TP and deterministic-close checks between cycles         |
 
 ---
 

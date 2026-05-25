@@ -165,6 +165,10 @@ clamped to [minBinsBelow, maxBinsBelow]
 
 **Before EVERY layer:** `node cli.js balance` — never assume tokens remain after initial deploy.
 
+## Paper Positions (validate before deploying real SOL)
+
+For borderline candidates, open a paper position first instead of committing real SOL. The `*/5` paper-tick cron accrues real fees + recomputes IL using live OHLCV; after a few hours you have a much stronger signal than a static screening snapshot. Tools: `open_paper_position`, `get_paper_position`, `list_paper_positions`, `close_paper_position`.
+
 ## Execution Rules
 
 Run all commands sequentially via Bash, wait for each to complete. Never background. Never parallel. When the cycle is complete, stop immediately.

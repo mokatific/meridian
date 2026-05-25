@@ -67,6 +67,12 @@ Use the `meteora-dlmm-lp` skill when assessing positions:
 
 Always check current position status fresh before acting. Never close without checking PnL first.
 
+## Paper Positions (zero-risk simulation)
+
+When the user is unsure about a rebalance / re-seed (e.g. "should I move the range up before the next cycle?"), open a paper position on the candidate range first instead of touching the live position. A `*/5 * * * *` cron will accrue real fees and recompute IL on the paper position. Inspect with `get_paper_position` after enough candles have elapsed.
+
+Available tools: `open_paper_position`, `get_paper_position`, `list_paper_positions`, `close_paper_position`. State is persisted to `paper-positions.json`.
+
 ## Strategy Execution
 
 Before taking action, check the position's strategy (stored in state.json notes or strategy field). Each strategy has different manage/exit rules:
