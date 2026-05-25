@@ -7,16 +7,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || null;
-const BASE  = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
+const BASE = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
 const ALLOWED_USER_IDS = new Set(
   String(process.env.TELEGRAM_ALLOWED_USER_IDS || "")
     .split(",")
     .map((id) => id.trim())
-    .filter(Boolean)
+    .filter(Boolean),
 );
 
-let chatId   = process.env.TELEGRAM_CHAT_ID || null;
-let _offset  = 0;
+let chatId = process.env.TELEGRAM_CHAT_ID || null;
+let _offset = 0;
 let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
@@ -55,7 +55,10 @@ function isAuthorizedIncomingMessage(msg) {
 
   if (!chatId) {
     if (!_warnedMissingChatId) {
-      log("telegram_warn", "Ignoring inbound Telegram messages because TELEGRAM_CHAT_ID / user-config.telegramChatId is not configured. Auto-registration is disabled for safety.");
+      log(
+        "telegram_warn",
+        "Ignoring inbound Telegram messages because TELEGRAM_CHAT_ID / user-config.telegramChatId is not configured. Auto-registration is disabled for safety.",
+      );
       _warnedMissingChatId = true;
     }
     return false;
@@ -65,7 +68,10 @@ function isAuthorizedIncomingMessage(msg) {
 
   if (chatType !== "private" && ALLOWED_USER_IDS.size === 0) {
     if (!_warnedMissingAllowedUsers) {
-      log("telegram_warn", "Ignoring group Telegram messages because TELEGRAM_ALLOWED_USER_IDS is not configured. Set explicit allowed user IDs for command/control.");
+      log(
+        "telegram_warn",
+        "Ignoring group Telegram messages because TELEGRAM_ALLOWED_USER_IDS is not configured. Set explicit allowed user IDs for command/control.",
+      );
       _warnedMissingAllowedUsers = true;
     }
     return false;
@@ -83,24 +89,39 @@ export function isEnabled() {
   return !!TOKEN;
 }
 
-async function postTelegram(method, body) {
+async function postTelegram(method, body, retries = 3) {
   if (!TOKEN || !chatId) return null;
-  try {
-    const res = await fetch(`${BASE}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, ...body }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      log("telegram_error", `${method} ${res.status}: ${err.slice(0, 200)}`);
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(`${BASE}/${method}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, ...body }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        if (res.status === 429) {
+          // Rate limited - wait and retry
+          const retryAfter = parseInt(err.match(/retry_after":(\d+)/)?.[1] || "5");
+          log("telegram_warn", `Rate limited, retry after ${retryAfter}s`);
+          await sleep(retryAfter * 1000);
+          continue;
+        }
+        log("telegram_error", `${method} ${res.status}: ${err.slice(0, 200)}`);
+        return null;
+      }
+      return await res.json();
+    } catch (e) {
+      if (attempt < retries - 1) {
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
+      log("telegram_error", `${method} failed after ${retries} attempts: ${e.message}`);
       return null;
     }
-    return await res.json();
-  } catch (e) {
-    log("telegram_error", `${method} failed: ${e.message}`);
-    return null;
   }
+  return null;
 }
 
 async function postTelegramRaw(method, body) {
@@ -229,7 +250,7 @@ function summarizeToolResult(name, result) {
     case "deploy_position":
       return result.position ? `position ${String(result.position).slice(0, 8)}...` : "submitted";
     case "close_position":
-      return result.success ? "closed" : (result.reason || "failed");
+      return result.success ? "closed" : result.reason || "failed";
     case "claim_fees":
       return result.claimed_amount != null ? `claimed ${result.claimed_amount}` : "done";
     case "update_config":
@@ -343,16 +364,25 @@ export async function createLiveMessage(title, intro = "Starting...") {
   };
 }
 
-
 // ─── Long polling ────────────────────────────────────────────────
 async function poll(onMessage) {
+  let consecutiveErrors = 0;
   while (_polling) {
     try {
-      const res = await fetch(
-        `${BASE}/getUpdates?offset=${_offset}&timeout=30`,
-        { signal: AbortSignal.timeout(35_000) }
-      );
-      if (!res.ok) { await sleep(5000); continue; }
+      // Use shorter timeout (10s) to avoid connection drops
+      const res = await fetch(`${BASE}/getUpdates?offset=${_offset}&timeout=10`, {
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) {
+        consecutiveErrors++;
+        const delay = Math.min(3000 * consecutiveErrors, 30000);
+        if (consecutiveErrors <= 3) {
+          log("telegram_warn", `Poll HTTP ${res.status}, retry in ${delay / 1000}s`);
+        }
+        await sleep(delay);
+        continue;
+      }
+      consecutiveErrors = 0;
       const data = await res.json();
       for (const update of data.result || []) {
         _offset = update.update_id + 1;
@@ -380,9 +410,16 @@ async function poll(onMessage) {
       }
     } catch (e) {
       if (!e.message?.includes("aborted")) {
-        log("telegram_error", `Poll error: ${e.message}`);
+        consecutiveErrors++;
+        // Only log first few errors to avoid spam
+        if (consecutiveErrors <= 3) {
+          log("telegram_error", `Poll error: ${e.message}`);
+        }
+        await sleep(Math.min(3000 * consecutiveErrors, 30000));
+        continue;
       }
-      await sleep(5000);
+      // Aborted (timeout) - normal, just continue
+      await sleep(500);
     }
   }
 }
@@ -399,25 +436,40 @@ export function stopPolling() {
 }
 
 // ─── Notification helpers ────────────────────────────────────────
-export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, rangeCoverage, binStep, baseFee }) {
+export async function notifyDeploy({
+  pair,
+  amountSol,
+  position,
+  tx,
+  priceRange,
+  rangeCoverage,
+  binStep,
+  baseFee,
+  dryRun,
+}) {
   if (hasActiveLiveMessage()) return;
+  const icon = dryRun ? "🧪" : "✅";
+  const label = dryRun ? "Deployed (DRY RUN)" : "Deployed";
   const priceStr = priceRange
     ? `Price range: ${priceRange.min < 0.0001 ? priceRange.min.toExponential(3) : priceRange.min.toFixed(6)} – ${priceRange.max < 0.0001 ? priceRange.max.toExponential(3) : priceRange.max.toFixed(6)}\n`
     : "";
   const coverageStr = rangeCoverage
     ? `Range cover: ${fmtPct(rangeCoverage.downside_pct)} downside | ${fmtPct(rangeCoverage.upside_pct)} upside | ${fmtPct(rangeCoverage.width_pct)} total\n`
     : "";
-  const poolStr = (binStep || baseFee)
-    ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
-    : "";
+  const poolStr =
+    binStep || baseFee
+      ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
+      : "";
+  const posStr = dryRun
+    ? `Mode: DRY RUN — no real transaction sent\n`
+    : `Position: <code>${position?.slice(0, 8)}...</code>\nTx: <code>${tx?.slice(0, 16)}...</code>`;
   await sendHTML(
-    `✅ <b>Deployed</b> ${pair}\n` +
-    `Amount: ${amountSol} SOL\n` +
-    priceStr +
-    coverageStr +
-    poolStr +
-    `Position: <code>${position?.slice(0, 8)}...</code>\n` +
-    `Tx: <code>${tx?.slice(0, 16)}...</code>`
+    `${icon} <b>${label}</b> ${pair}\n` +
+      `Amount: ${amountSol} SOL\n` +
+      priceStr +
+      coverageStr +
+      poolStr +
+      posStr,
   );
 }
 
@@ -426,7 +478,7 @@ export async function notifyClose({ pair, pnlUsd, pnlPct }) {
   const sign = pnlUsd >= 0 ? "+" : "";
   await sendHTML(
     `🔒 <b>Closed</b> ${pair}\n` +
-    `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)`
+      `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)`,
   );
 }
 
@@ -434,17 +486,14 @@ export async function notifySwap({ inputSymbol, outputSymbol, amountIn, amountOu
   if (hasActiveLiveMessage()) return;
   await sendHTML(
     `🔄 <b>Swapped</b> ${inputSymbol} → ${outputSymbol}\n` +
-    `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}\n` +
-    `Tx: <code>${tx?.slice(0, 16)}...</code>`
+      `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}\n` +
+      `Tx: <code>${tx?.slice(0, 16)}...</code>`,
   );
 }
 
 export async function notifyOutOfRange({ pair, minutesOOR }) {
   if (hasActiveLiveMessage()) return;
-  await sendHTML(
-    `⚠️ <b>Out of Range</b> ${pair}\n` +
-    `Been OOR for ${minutesOOR} minutes`
-  );
+  await sendHTML(`⚠️ <b>Out of Range</b> ${pair}\n` + `Been OOR for ${minutesOOR} minutes`);
 }
 
 function sleep(ms) {
