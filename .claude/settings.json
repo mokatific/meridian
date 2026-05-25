@@ -3,7 +3,7 @@
   "permissions": {
     "allow": [
       "Bash(node *)",
-      "Bash(npm *)",
+      "Bash(yarn *)",
       "Bash(onchainos *)",
       "Bash(curl *)",
       "Bash(git status)",
@@ -16,12 +16,7 @@
       "Glob",
       "Grep"
     ],
-    "deny": [
-      "Bash(rm -rf *)",
-      "Bash(wget *)",
-      "Read(./.env)",
-      "Read(./.env.*)"
-    ]
+    "deny": ["Bash(rm -rf *)", "Bash(wget *)", "Read(./.env)", "Read(./.env.*)"]
   },
   "hooks": {
     "PreToolUse": [
