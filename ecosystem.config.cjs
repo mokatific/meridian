@@ -5,7 +5,7 @@
  * Reads .env from the repo root — no npm deps required.
  *
  * Usage:
- *   pm2 start ecosystem.config.js
+ *   pm2 start ecosystem.config.cjs
  *   pm2 restart meridian
  *   pm2 stop meridian
  *   pm2 delete meridian
