@@ -27,21 +27,22 @@ Use this as the primary tool for finding new LP opportunities.`,
         properties: {
           page_size: {
             type: "number",
-            description: "Number of pools to return. Default 50. Use 10-20 for quick scans."
+            description: "Number of pools to return. Default 50. Use 10-20 for quick scans.",
           },
           timeframe: {
             type: "string",
             enum: ["1h", "4h", "12h", "24h"],
-            description: "Timeframe for metrics. Use 24h for general screening, 1h for momentum."
+            description: "Timeframe for metrics. Use 24h for general screening, 1h for momentum.",
           },
           category: {
             type: "string",
             enum: ["top", "new", "trending"],
-            description: "Pool category. 'top' = highest fee/TVL, 'new' = recently created, 'trending' = gaining activity."
-          }
-        }
-      }
-    }
+            description:
+              "Pool category. 'top' = highest fee/TVL, 'new' = recently created, 'trending' = gaining activity.",
+          },
+        },
+      },
+    },
   },
 
   {
@@ -59,11 +60,11 @@ If this returns one candidate, still judge whether it is actually worth deployin
         properties: {
           limit: {
             type: "number",
-            description: "Number of top candidates to return. Default 3."
-          }
-        }
-      }
-    }
+            description: "Number of top candidates to return. Default 3.",
+          },
+        },
+      },
+    },
   },
 
   {
@@ -81,17 +82,18 @@ IMPORTANT: Only call this with a real pool address from get_my_positions or get_
         properties: {
           pool_address: {
             type: "string",
-            description: "The on-chain pool address (base58 public key)"
+            description: "The on-chain pool address (base58 public key)",
           },
           timeframe: {
             type: "string",
             enum: ["5m", "15m", "30m", "1h", "2h", "4h", "12h", "24h"],
-            description: "Data timeframe. Default 5m for management (most accurate). Use 4h+ for screening."
-          }
+            description:
+              "Data timeframe. Default 5m for management (most accurate). Use 4h+ for screening.",
+          },
         },
-        required: ["pool_address"]
-      }
-    }
+        required: ["pool_address"],
+      },
+    },
   },
 
   // ═══════════════════════════════════════════
@@ -113,12 +115,12 @@ Only call this if you need the current price to calculate a specific bin range (
         properties: {
           pool_address: {
             type: "string",
-            description: "The DLMM pool address"
-          }
+            description: "The DLMM pool address",
+          },
         },
-        required: ["pool_address"]
-      }
-    }
+        required: ["pool_address"],
+      },
+    },
   },
 
   {
@@ -150,53 +152,70 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
         properties: {
           pool_address: {
             type: "string",
-            description: "The DLMM pool address to LP in"
+            description: "The DLMM pool address to LP in",
           },
           amount_y: {
             type: "number",
-            description: "Amount of quote token (usually SOL) to deposit."
+            description: "Amount of quote token (usually SOL) to deposit.",
           },
           amount_x: {
             type: "number",
-            description: "Unsupported for this agent. Keep at 0; deploys are single-side SOL via amount_y."
+            description:
+              "Unsupported for this agent. Keep at 0; deploys are single-side SOL via amount_y.",
           },
           amount_sol: {
             type: "number",
-            description: "Alias for amount_y. For backward compatibility."
+            description: "Alias for amount_y. For backward compatibility.",
           },
           strategy: {
             type: "string",
             enum: ["bid_ask", "spot"],
-            description: "DLMM strategy type. If user specifies, use exactly what they said. Otherwise use the active strategy's lp_strategy field."
+            description:
+              "DLMM strategy type. If user specifies, use exactly what they said. Otherwise use the active strategy's lp_strategy field.",
           },
           bins_below: {
             type: "number",
-            description: "Number of bins below the current active bin. For single-side SOL deploys, this is the main range input: lower bin = active bin - bins_below, upper bin = active bin."
+            description:
+              "Number of bins below the current active bin. For single-side SOL deploys, this is the main range input: lower bin = active bin - bins_below, upper bin = active bin.",
           },
           bins_above: {
             type: "number",
-            description: "Number of bins above the current active bin. Keep this at 0 for single-side SOL deploys. Only use this for dual-sided or explicit upside-exposure deploys."
+            description:
+              "Number of bins above the current active bin. Keep this at 0 for single-side SOL deploys. Only use this for dual-sided or explicit upside-exposure deploys.",
           },
           downside_pct: {
             type: "number",
-            description: "Optional human-friendly downside range in percent below the current active price. Converted to bins internally via the Meteora SDK."
+            description:
+              "Optional human-friendly downside range in percent below the current active price. Converted to bins internally via the Meteora SDK.",
           },
           upside_pct: {
             type: "number",
-            description: "Optional human-friendly upside range in percent above the current active price. Do not use this for single-side SOL deploys."
+            description:
+              "Optional human-friendly upside range in percent above the current active price. Do not use this for single-side SOL deploys.",
           },
           pool_name: { type: "string", description: "Human-readable pool name for record-keeping" },
-          base_mint: { type: "string", description: "Base token mint address — used to prevent duplicate token exposure across pools" },
+          base_mint: {
+            type: "string",
+            description:
+              "Base token mint address — used to prevent duplicate token exposure across pools",
+          },
           bin_step: { type: "number", description: "Pool bin step (from discover_pools)" },
-          base_fee: { type: "number", description: "Pool base fee percentage (from discover_pools)" },
-          volatility: { type: "number", description: "Pool volatility at deploy time, sourced from max(screening timeframe, 30m)" },
+          base_fee: {
+            type: "number",
+            description: "Pool base fee percentage (from discover_pools)",
+          },
+          volatility: {
+            type: "number",
+            description:
+              "Pool volatility at deploy time, sourced from max(screening timeframe, 30m)",
+          },
           fee_tvl_ratio: { type: "number", description: "fee/TVL ratio at deploy time" },
           organic_score: { type: "number", description: "Base token organic score at deploy time" },
-          initial_value_usd: { type: "number", description: "Estimated USD value being deployed" }
+          initial_value_usd: { type: "number", description: "Estimated USD value being deployed" },
         },
-        required: ["pool_address"]
-      }
-    }
+        required: ["pool_address"],
+      },
+    },
   },
 
   // ═══════════════════════════════════════════
@@ -213,11 +232,11 @@ Returns current feePerTvl24h which indicates the current APY of the pool.`,
         type: "object",
         properties: {
           pool_address: { type: "string", description: "The pool address" },
-          position_address: { type: "string", description: "The position public key" }
+          position_address: { type: "string", description: "The position public key" },
         },
-        required: ["pool_address", "position_address"]
-      }
-    }
+        required: ["pool_address", "position_address"],
+      },
+    },
   },
 
   {
@@ -237,9 +256,9 @@ Returns positions grouped by pool, each with:
 Use this at the start of every management cycle.`,
       parameters: {
         type: "object",
-        properties: {}
-      }
-    }
+        properties: {},
+      },
+    },
   },
 
   {
@@ -256,12 +275,12 @@ WARNING: This executes a real on-chain transaction.`,
         properties: {
           position_address: {
             type: "string",
-            description: "The position public key to claim fees from"
-          }
+            description: "The position public key to claim fees from",
+          },
         },
-        required: ["position_address"]
-      }
-    }
+        required: ["position_address"],
+      },
+    },
   },
 
   {
@@ -282,20 +301,22 @@ WARNING: This executes a real on-chain transaction. Cannot be undone.`,
         properties: {
           position_address: {
             type: "string",
-            description: "The position public key to close"
+            description: "The position public key to close",
           },
           skip_swap: {
             type: "boolean",
-            description: "Set to true if user explicitly wants to hold/keep the base token after closing. Default: false (auto-swaps base token back to SOL)."
+            description:
+              "Set to true if user explicitly wants to hold/keep the base token after closing. Default: false (auto-swaps base token back to SOL).",
           },
           reason: {
             type: "string",
-            description: "Why this position is being closed. Include the rule that triggered it, e.g. 'low yield', 'stop loss', 'trailing TP', 'OOR'. Used for pool memory."
-          }
+            description:
+              "Why this position is being closed. Include the rule that triggered it, e.g. 'low yield', 'stop loss', 'trailing TP', 'OOR'. Used for pool memory.",
+          },
         },
-        required: ["position_address"]
-      }
-    }
+        required: ["position_address"],
+      },
+    },
   },
 
   {
@@ -313,12 +334,12 @@ position address, pool, bin range, in-range status, unclaimed fees, PnL, age.`,
         properties: {
           wallet_address: {
             type: "string",
-            description: "The Solana wallet address (base58 public key) to check"
-          }
+            description: "The Solana wallet address (base58 public key) to check",
+          },
         },
-        required: ["wallet_address"]
-      }
-    }
+        required: ["wallet_address"],
+      },
+    },
   },
 
   // ═══════════════════════════════════════════
@@ -338,9 +359,9 @@ Returns:
 Use to check available capital before deploying positions.`,
       parameters: {
         type: "object",
-        properties: {}
-      }
-    }
+        properties: {},
+      },
+    },
   },
 
   {
@@ -358,20 +379,20 @@ WARNING: This executes a real on-chain transaction.`,
         properties: {
           input_mint: {
             type: "string",
-            description: "Mint address of the token to sell"
+            description: "Mint address of the token to sell",
           },
           output_mint: {
             type: "string",
-            description: "Mint address of the token to buy"
+            description: "Mint address of the token to buy",
           },
           amount: {
             type: "number",
-            description: "Amount of input token to swap (in human-readable units, not lamports)"
+            description: "Amount of input token to swap (in human-readable units, not lamports)",
           },
         },
-        required: ["input_mint", "output_mint", "amount"]
-      }
-    }
+        required: ["input_mint", "output_mint", "amount"],
+      },
+    },
   },
 
   // ═══════════════════════════════════════════
@@ -398,16 +419,16 @@ Reason is optional but helpful — logged as a lesson when provided.`,
         properties: {
           changes: {
             type: "object",
-            description: "Key-value pairs of settings to update. e.g. { \"takeProfitPct\": 8 }"
+            description: 'Key-value pairs of settings to update. e.g. { "takeProfitPct": 8 }',
           },
           reason: {
             type: "string",
-            description: "Why you are making this change — what you observed that justified it"
-          }
+            description: "Why you are making this change — what you observed that justified it",
+          },
         },
-        required: ["changes"]
-      }
-    }
+        required: ["changes"],
+      },
+    },
   },
 
   {
@@ -417,8 +438,8 @@ Reason is optional but helpful — logged as a lesson when provided.`,
       description: `Pull the latest code from git and restart the agent.
 Use when the user says "update", "pull latest", "update yourself", etc.
 Responds with what changed before restarting in 3 seconds.`,
-      parameters: { type: "object", properties: {} }
-    }
+      parameters: { type: "object", properties: {} },
+    },
   },
 
   {
@@ -437,11 +458,11 @@ This is the preferred tool for answering "why did you..." questions because it r
         properties: {
           limit: {
             type: "number",
-            description: "How many recent decisions to return. Default 6."
-          }
-        }
-      }
-    }
+            description: "How many recent decisions to return. Default 6.",
+          },
+        },
+      },
+    },
   },
 
   // ═══════════════════════════════════════════
@@ -458,14 +479,26 @@ Use when the user says "add smart wallet", "track this wallet", "add to smart wa
       parameters: {
         type: "object",
         properties: {
-          name: { type: "string", description: "Label for this wallet (e.g. 'alpha-1', 'whale-sol')" },
+          name: {
+            type: "string",
+            description: "Label for this wallet (e.g. 'alpha-1', 'whale-sol')",
+          },
           address: { type: "string", description: "Solana wallet address (base58)" },
-          category: { type: "string", enum: ["alpha", "smart", "fast", "multi"], description: "Wallet category (default: alpha)" },
-          type: { type: "string", enum: ["lp", "holder"], description: "lp = tracks LP positions, holder = tracks token holdings only (default: lp)" }
+          category: {
+            type: "string",
+            enum: ["alpha", "smart", "fast", "multi"],
+            description: "Wallet category (default: alpha)",
+          },
+          type: {
+            type: "string",
+            enum: ["lp", "holder"],
+            description:
+              "lp = tracks LP positions, holder = tracks token holdings only (default: lp)",
+          },
         },
-        required: ["name", "address"]
-      }
-    }
+        required: ["name", "address"],
+      },
+    },
   },
 
   {
@@ -476,11 +509,11 @@ Use when the user says "add smart wallet", "track this wallet", "add to smart wa
       parameters: {
         type: "object",
         properties: {
-          address: { type: "string", description: "Wallet address to remove" }
+          address: { type: "string", description: "Wallet address to remove" },
         },
-        required: ["address"]
-      }
-    }
+        required: ["address"],
+      },
+    },
   },
 
   {
@@ -488,8 +521,8 @@ Use when the user says "add smart wallet", "track this wallet", "add to smart wa
     function: {
       name: "list_smart_wallets",
       description: "List all currently tracked smart wallets.",
-      parameters: { type: "object", properties: {} }
-    }
+      parameters: { type: "object", properties: {} },
+    },
   },
 
   {
@@ -502,11 +535,35 @@ If no smart wallets are present, rely on fundamentals (fees, volume, organic sco
       parameters: {
         type: "object",
         properties: {
-          pool_address: { type: "string", description: "Pool address to check" }
+          pool_address: { type: "string", description: "Pool address to check" },
         },
-        required: ["pool_address"]
-      }
-    }
+        required: ["pool_address"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "discover_wallets_from_twitter",
+      description: `Scan recent tweets from known KOL (Evil Panda strategy) accounts for Solana pool addresses, then discover smart wallet holders from those pools.
+Use this to find early alpha wallets that KOLs are talking about before they become well-known LPers.
+Returns discovered KOL cluster wallets that can be added as "holder" type smart wallets.`,
+      parameters: {
+        type: "object",
+        properties: {
+          kol_handles: {
+            type: "string",
+            description:
+              "Comma-separated Twitter handles to scan (without @). Default: EvilPanda,arip13741167,4thinfected",
+          },
+          tweets_per_kol: {
+            type: "number",
+            description: "Number of recent tweets to fetch per KOL (default: 10)",
+          },
+        },
+      },
+    },
   },
 
   {
@@ -521,11 +578,11 @@ Returns: organic score, holder count, mcap, liquidity, audit flags (mint/freeze 
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Token name, symbol, or mint address" }
+          query: { type: "string", description: "Token name, symbol, or mint address" },
         },
-        required: ["query"]
-      }
-    }
+        required: ["query"],
+      },
+    },
   },
 
   {
@@ -545,12 +602,19 @@ NOTE: Requires mint address. If you only have a symbol/name, call get_token_info
       parameters: {
         type: "object",
         properties: {
-          mint: { type: "string", description: "Token mint address (base58). Use get_token_info first if you only have a symbol." },
-          limit: { type: "number", description: "How many holders to return (default 20, max 100)" }
+          mint: {
+            type: "string",
+            description:
+              "Token mint address (base58). Use get_token_info first if you only have a symbol.",
+          },
+          limit: {
+            type: "number",
+            description: "How many holders to return (default 20, max 100)",
+          },
         },
-        required: ["mint"]
-      }
-    }
+        required: ["mint"],
+      },
+    },
   },
 
   {
@@ -575,11 +639,11 @@ BAD narrative signals (caution or skip):
       parameters: {
         type: "object",
         properties: {
-          mint: { type: "string", description: "Token mint address (base58)" }
+          mint: { type: "string", description: "Token mint address (base58)" },
         },
-        required: ["mint"]
-      }
-    }
+        required: ["mint"],
+      },
+    },
   },
 
   {
@@ -598,16 +662,16 @@ Returns pool address, name, bin_step, fee %, TVL, volume, and token mints.`,
         properties: {
           query: {
             type: "string",
-            description: "Token symbol, ticker name, or contract address to search for"
+            description: "Token symbol, ticker name, or contract address to search for",
           },
           limit: {
             type: "number",
-            description: "Max results to return (default 10)"
-          }
+            description: "Max results to return (default 10)",
+          },
         },
-        required: ["query"]
-      }
-    }
+        required: ["query"],
+      },
+    },
   },
 
   {
@@ -625,16 +689,16 @@ Returns: aggregate LPAgent-backed top-LPer patterns from the Agent Meridian
         properties: {
           pool_address: {
             type: "string",
-            description: "The pool address to look up top LPers for"
+            description: "The pool address to look up top LPers for",
           },
           limit: {
             type: "number",
-            description: "Number of top LPers to return. Default 5."
-          }
+            description: "Number of top LPers to return. Default 5.",
+          },
         },
-        required: ["pool_address"]
-      }
-    }
+        required: ["pool_address"],
+      },
+    },
   },
 
   {
@@ -656,16 +720,16 @@ Server note: study data is cached and refreshed every 30 minutes.`,
         properties: {
           pool_address: {
             type: "string",
-            description: "Pool address to study top LPers for"
+            description: "Pool address to study top LPers for",
           },
           limit: {
             type: "number",
-            description: "Number of top LPers to study. Default 4."
-          }
+            description: "Number of top LPers to study. Default 4.",
+          },
         },
-        required: ["pool_address"]
-      }
-    }
+        required: ["pool_address"],
+      },
+    },
   },
 
   {
@@ -684,16 +748,17 @@ Modes:
           mode: {
             type: "string",
             enum: ["keyword", "all", "performance"],
-            description: "What to clear"
+            description: "What to clear",
           },
           keyword: {
             type: "string",
-            description: "Required when mode=keyword. Case-insensitive substring match against lesson text."
-          }
+            description:
+              "Required when mode=keyword. Case-insensitive substring match against lesson text.",
+          },
         },
-        required: ["mode"]
-      }
-    }
+        required: ["mode"],
+      },
+    },
   },
 
   {
@@ -714,16 +779,17 @@ Pass null or empty string to clear an existing instruction.`,
         properties: {
           position_address: {
             type: "string",
-            description: "The position address to attach the instruction to"
+            description: "The position address to attach the instruction to",
           },
           instruction: {
             type: "string",
-            description: "The instruction to persist (e.g. 'hold until PnL >= 5%'). Pass empty string to clear."
-          }
+            description:
+              "The instruction to persist (e.g. 'hold until PnL >= 5%'). Pass empty string to clear.",
+          },
         },
-        required: ["position_address", "instruction"]
-      }
-    }
+        required: ["position_address", "instruction"],
+      },
+    },
   },
 
   {
@@ -746,26 +812,27 @@ Examples:
         properties: {
           rule: {
             type: "string",
-            description: "The lesson rule — specific and actionable"
+            description: "The lesson rule — specific and actionable",
           },
           tags: {
             type: "array",
             items: { type: "string" },
-            description: "Tags e.g. ['narrative', 'screening', 'oor', 'fees', 'management']"
+            description: "Tags e.g. ['narrative', 'screening', 'oor', 'fees', 'management']",
           },
           role: {
             type: "string",
             enum: ["SCREENER", "MANAGER", "GENERAL"],
-            description: "Which agent role this lesson applies to. Omit for all roles."
+            description: "Which agent role this lesson applies to. Omit for all roles.",
           },
           pinned: {
             type: "boolean",
-            description: "Pin this lesson so it's always injected regardless of memory cap. Use for critical rules."
-          }
+            description:
+              "Pin this lesson so it's always injected regardless of memory cap. Use for critical rules.",
+          },
         },
-        required: ["rule"]
-      }
-    }
+        required: ["rule"],
+      },
+    },
   },
 
   // ─── Strategy Library ──────────────────────────────────────────
@@ -781,75 +848,100 @@ The strategy will be available for selection before future deployments.`,
       parameters: {
         type: "object",
         properties: {
-          id:           { type: "string", description: "Short slug e.g. 'overnight_classic_bid_ask', 'panda_strat'" },
-          name:         { type: "string", description: "Human-readable name" },
-          author:       { type: "string", description: "Strategy author/creator" },
-          lp_strategy:  { type: "string", enum: ["bid_ask", "spot", "curve"], description: "LP strategy type" },
+          id: {
+            type: "string",
+            description: "Short slug e.g. 'overnight_classic_bid_ask', 'panda_strat'",
+          },
+          name: { type: "string", description: "Human-readable name" },
+          author: { type: "string", description: "Strategy author/creator" },
+          lp_strategy: {
+            type: "string",
+            enum: ["bid_ask", "spot", "curve"],
+            description: "LP strategy type",
+          },
           token_criteria: {
             type: "object",
             description: "Token selection criteria",
             properties: {
-              min_mcap:      { type: "number", description: "Minimum market cap in USD" },
-              min_age_days:  { type: "number", description: "Minimum token age in days" },
-              requires_kol:  { type: "boolean", description: "Requires KOL presence" },
-              notes:         { type: "string", description: "Additional token selection notes" }
-            }
+              min_mcap: { type: "number", description: "Minimum market cap in USD" },
+              min_age_days: { type: "number", description: "Minimum token age in days" },
+              requires_kol: { type: "boolean", description: "Requires KOL presence" },
+              notes: { type: "string", description: "Additional token selection notes" },
+            },
           },
           entry: {
             type: "object",
             description: "Entry conditions",
             properties: {
-              condition:                    { type: "string", description: "Entry condition description" },
-              price_change_threshold_pct:   { type: "number", description: "Price change % that triggers entry (e.g. -30 for -30% from ATH)" },
-              single_side:                  { type: "string", description: "sol or token" }
-            }
+              condition: { type: "string", description: "Entry condition description" },
+              price_change_threshold_pct: {
+                type: "number",
+                description: "Price change % that triggers entry (e.g. -30 for -30% from ATH)",
+              },
+              single_side: { type: "string", description: "sol or token" },
+            },
           },
           range: {
             type: "object",
             description: "Bin range configuration",
             properties: {
-              type:           { type: "string", enum: ["tight", "default", "wide", "panda"], description: "Range type (tight 10-30%, default 40-57%, wide 60%+, panda 85-90%)" },
-              bins_below_pct: { type: "number", description: "How far below entry price the range covers (%)" },
-              notes:          { type: "string" }
-            }
+              type: {
+                type: "string",
+                enum: ["tight", "default", "wide", "panda"],
+                description: "Range type (tight 10-30%, default 40-57%, wide 60%+, panda 85-90%)",
+              },
+              bins_below_pct: {
+                type: "number",
+                description: "How far below entry price the range covers (%)",
+              },
+              notes: { type: "string" },
+            },
           },
           exit: {
             type: "object",
             properties: {
               take_profit_pct: { type: "number", description: "Take profit threshold %" },
-              notes:           { type: "string" }
-            }
+              notes: { type: "string" },
+            },
           },
-          best_for: { type: "string", description: "Short description of ideal market conditions for this strategy" },
-          raw:      { type: "string", description: "Original tweet or text the strategy was parsed from" }
+          best_for: {
+            type: "string",
+            description: "Short description of ideal market conditions for this strategy",
+          },
+          raw: {
+            type: "string",
+            description: "Original tweet or text the strategy was parsed from",
+          },
         },
-        required: ["id", "name"]
-      }
-    }
+        required: ["id", "name"],
+      },
+    },
   },
 
   {
     type: "function",
     function: {
       name: "list_strategies",
-      description: "List all saved strategies in the library with a summary of each. Shows which one is currently active.",
-      parameters: { type: "object", properties: {} }
-    }
+      description:
+        "List all saved strategies in the library with a summary of each. Shows which one is currently active.",
+      parameters: { type: "object", properties: {} },
+    },
   },
 
   {
     type: "function",
     function: {
       name: "get_strategy",
-      description: "Get full details of a specific strategy including all criteria, range settings, and original raw text.",
+      description:
+        "Get full details of a specific strategy including all criteria, range settings, and original raw text.",
       parameters: {
         type: "object",
         properties: {
-          id: { type: "string", description: "Strategy ID from list_strategies" }
+          id: { type: "string", description: "Strategy ID from list_strategies" },
         },
-        required: ["id"]
-      }
-    }
+        required: ["id"],
+      },
+    },
   },
 
   {
@@ -862,11 +954,11 @@ Call list_strategies first to see available options.`,
       parameters: {
         type: "object",
         properties: {
-          id: { type: "string", description: "Strategy ID to activate" }
+          id: { type: "string", description: "Strategy ID to activate" },
         },
-        required: ["id"]
-      }
-    }
+        required: ["id"],
+      },
+    },
   },
 
   {
@@ -877,11 +969,11 @@ Call list_strategies first to see available options.`,
       parameters: {
         type: "object",
         properties: {
-          id: { type: "string", description: "Strategy ID to remove" }
+          id: { type: "string", description: "Strategy ID to remove" },
         },
-        required: ["id"]
-      }
-    }
+        required: ["id"],
+      },
+    },
   },
 
   // ─── Lesson Management ─────────────────────────────────────────
@@ -895,13 +987,20 @@ Use to find a lesson ID before pinning/unpinning, or to audit what the agent cur
       parameters: {
         type: "object",
         properties: {
-          role:   { type: "string", enum: ["SCREENER", "MANAGER", "GENERAL"], description: "Filter by role" },
-          pinned: { type: "boolean", description: "Filter to only pinned (true) or unpinned (false) lessons" },
-          tag:    { type: "string", description: "Filter by a specific tag" },
-          limit:  { type: "number", description: "Max lessons to return (default 30)" }
-        }
-      }
-    }
+          role: {
+            type: "string",
+            enum: ["SCREENER", "MANAGER", "GENERAL"],
+            description: "Filter by role",
+          },
+          pinned: {
+            type: "boolean",
+            description: "Filter to only pinned (true) or unpinned (false) lessons",
+          },
+          tag: { type: "string", description: "Filter by a specific tag" },
+          limit: { type: "number", description: "Max lessons to return (default 30)" },
+        },
+      },
+    },
   },
 
   {
@@ -914,11 +1013,11 @@ Call list_lessons first to find the lesson ID.`,
       parameters: {
         type: "object",
         properties: {
-          id: { type: "number", description: "Lesson ID (from list_lessons)" }
+          id: { type: "number", description: "Lesson ID (from list_lessons)" },
         },
-        required: ["id"]
-      }
-    }
+        required: ["id"],
+      },
+    },
   },
 
   {
@@ -929,11 +1028,11 @@ Call list_lessons first to find the lesson ID.`,
       parameters: {
         type: "object",
         properties: {
-          id: { type: "number", description: "Lesson ID to unpin" }
+          id: { type: "number", description: "Lesson ID to unpin" },
         },
-        required: ["id"]
-      }
-    }
+        required: ["id"],
+      },
+    },
   },
 
   // ─── Performance History ────────────────────────────────────────
@@ -950,15 +1049,15 @@ Returns individual closed positions with PnL, fees, strategy, hold time, and clo
         properties: {
           hours: {
             type: "number",
-            description: "How many hours back to look (default 24). Use 168 for last 7 days."
+            description: "How many hours back to look (default 24). Use 168 for last 7 days.",
           },
           limit: {
             type: "number",
-            description: "Max records to return (default 50)"
-          }
-        }
-      }
-    }
+            description: "Max records to return (default 50)",
+          },
+        },
+      },
+    },
   },
 
   // ─── Pool Memory ────────────────────────────────────────────────
@@ -977,12 +1076,12 @@ Also useful during screening to skip pools with a bad track record.`,
         properties: {
           pool_address: {
             type: "string",
-            description: "The pool address to look up"
-          }
+            description: "The pool address to look up",
+          },
         },
-        required: ["pool_address"]
-      }
-    }
+        required: ["pool_address"],
+      },
+    },
   },
 
   {
@@ -999,16 +1098,16 @@ Use when you observe something worth remembering about a specific pool:
         properties: {
           pool_address: {
             type: "string",
-            description: "Pool address to annotate"
+            description: "Pool address to annotate",
           },
           note: {
             type: "string",
-            description: "The note to save"
-          }
+            description: "The note to save",
+          },
         },
-        required: ["pool_address", "note"]
-      }
-    }
+        required: ["pool_address", "note"],
+      },
+    },
   },
 
   // ─── Token Blacklist ────────────────────────────────────────────
@@ -1025,20 +1124,20 @@ Blacklisted tokens are filtered BEFORE the LLM even sees pool candidates.`,
         properties: {
           mint: {
             type: "string",
-            description: "The base token mint address to blacklist"
+            description: "The base token mint address to blacklist",
           },
           symbol: {
             type: "string",
-            description: "Token symbol (for readability)"
+            description: "Token symbol (for readability)",
           },
           reason: {
             type: "string",
-            description: "Why this token is being blacklisted"
-          }
+            description: "Why this token is being blacklisted",
+          },
         },
-        required: ["mint", "reason"]
-      }
-    }
+        required: ["mint", "reason"],
+      },
+    },
   },
 
   {
@@ -1051,12 +1150,12 @@ Blacklisted tokens are filtered BEFORE the LLM even sees pool candidates.`,
         properties: {
           mint: {
             type: "string",
-            description: "The mint address to remove from the blacklist"
-          }
+            description: "The mint address to remove from the blacklist",
+          },
         },
-        required: ["mint"]
-      }
-    }
+        required: ["mint"],
+      },
+    },
   },
 
   {
@@ -1066,25 +1165,26 @@ Blacklisted tokens are filtered BEFORE the LLM even sees pool candidates.`,
       description: "List all blacklisted token mints with their reasons and timestamps.",
       parameters: {
         type: "object",
-        properties: {}
-      }
-    }
+        properties: {},
+      },
+    },
   },
   {
     type: "function",
     function: {
       name: "block_deployer",
-      description: "Block a deployer wallet address. Any token deployed by this wallet will be hard-filtered from screening before the LLM ever sees it.",
+      description:
+        "Block a deployer wallet address. Any token deployed by this wallet will be hard-filtered from screening before the LLM ever sees it.",
       parameters: {
         type: "object",
         properties: {
-          wallet:  { type: "string", description: "Deployer wallet address (base58)" },
-          label:   { type: "string", description: "Human-readable label (e.g. 'known rugger')" },
-          reason:  { type: "string", description: "Why this deployer is being blocked" },
+          wallet: { type: "string", description: "Deployer wallet address (base58)" },
+          label: { type: "string", description: "Human-readable label (e.g. 'known rugger')" },
+          reason: { type: "string", description: "Why this deployer is being blocked" },
         },
-        required: ["wallet"]
-      }
-    }
+        required: ["wallet"],
+      },
+    },
   },
   {
     type: "function",
@@ -1096,9 +1196,9 @@ Blacklisted tokens are filtered BEFORE the LLM even sees pool candidates.`,
         properties: {
           wallet: { type: "string", description: "Deployer wallet address to unblock" },
         },
-        required: ["wallet"]
-      }
-    }
+        required: ["wallet"],
+      },
+    },
   },
   {
     type: "function",
@@ -1107,9 +1207,9 @@ Blacklisted tokens are filtered BEFORE the LLM even sees pool candidates.`,
       description: "List all blocked deployer wallets.",
       parameters: {
         type: "object",
-        properties: {}
-      }
-    }
+        properties: {},
+      },
+    },
   },
 ];
 
@@ -1117,8 +1217,9 @@ export const tools = toolDefinitions.map((tool) => ({
   ...tool,
   function: {
     ...tool.function,
-    parameters: tool.function.parameters?.type === "object"
-      ? { additionalProperties: false, ...tool.function.parameters }
-      : tool.function.parameters,
+    parameters:
+      tool.function.parameters?.type === "object"
+        ? { additionalProperties: false, ...tool.function.parameters }
+        : tool.function.parameters,
   },
 }));

@@ -11,14 +11,35 @@ import {
 } from "./dlmm.js";
 import { getWalletBalances, swapToken } from "./wallet.js";
 import { studyTopLPers } from "./study.js";
-import { addLesson, clearAllLessons, clearPerformance, removeLessonsByKeyword, getPerformanceHistory, pinLesson, unpinLesson, listLessons } from "../lessons.js";
-import { setPositionInstruction } from "../state.js";
+import {
+  addLesson,
+  clearAllLessons,
+  clearPerformance,
+  removeLessonsByKeyword,
+  getPerformanceHistory,
+  pinLesson,
+  unpinLesson,
+  listLessons,
+} from "../lessons.js";
+import { setPositionInstruction, getTrackedPositions } from "../state.js";
 
 import { getPoolMemory, addPoolNote } from "../pool-memory.js";
-import { addStrategy, listStrategies, getStrategy, setActiveStrategy, removeStrategy } from "../strategy-library.js";
+import {
+  addStrategy,
+  listStrategies,
+  getStrategy,
+  setActiveStrategy,
+  removeStrategy,
+} from "../strategy-library.js";
 import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../token-blacklist.js";
 import { blockDev, unblockDev, listBlockedDevs } from "../dev-blocklist.js";
-import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
+import {
+  addSmartWallet,
+  removeSmartWallet,
+  listSmartWallets,
+  checkSmartWalletsOnPool,
+} from "../smart-wallets.js";
+import { discoverWalletsFromKolTweets } from "../twitter-wallet.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
 import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW } from "../config.js";
 import { getRecentDecisions } from "../decision-log.js";
@@ -171,7 +192,9 @@ async function validateDeployPoolThresholds(args) {
 
 // Registered by index.js so update_config can restart cron jobs when intervals change
 let _cronRestarter = null;
-export function registerCronRestarter(fn) { _cronRestarter = fn; }
+export function registerCronRestarter(fn) {
+  _cronRestarter = fn;
+}
 
 function coerceBoolean(value, key) {
   if (typeof value === "boolean") return value;
@@ -252,6 +275,7 @@ const toolMap = {
   remove_smart_wallet: removeSmartWallet,
   list_smart_wallets: listSmartWallets,
   check_smart_wallets_on_pool: checkSmartWalletsOnPool,
+  discover_wallets_from_twitter: discoverWalletsFromKolTweets,
   claim_fees: claimFees,
   close_position: closePosition,
   get_wallet_balance: getWalletBalances,
@@ -267,7 +291,11 @@ const toolMap = {
     try {
       const result = execSync("git pull", { cwd: process.cwd(), encoding: "utf8" }).trim();
       if (result.includes("Already up to date")) {
-        return { success: true, updated: false, message: "Already up to date — no restart needed." };
+        return {
+          success: true,
+          updated: false,
+          message: "Already up to date — no restart needed.",
+        };
       }
       // Delay restart so this tool response (and Telegram message) gets sent first
       setTimeout(() => {
@@ -291,11 +319,11 @@ const toolMap = {
   },
   get_performance_history: getPerformanceHistory,
   get_recent_decisions: ({ limit } = {}) => ({ decisions: getRecentDecisions(limit || 6) }),
-  add_strategy:        addStrategy,
-  list_strategies:     listStrategies,
-  get_strategy:        getStrategy,
+  add_strategy: addStrategy,
+  list_strategies: listStrategies,
+  get_strategy: getStrategy,
   set_active_strategy: setActiveStrategy,
-  remove_strategy:     removeStrategy,
+  remove_strategy: removeStrategy,
   get_pool_memory: getPoolMemory,
   add_pool_note: addPoolNote,
   add_to_blacklist: addToBlacklist,
@@ -308,7 +336,7 @@ const toolMap = {
     addLesson(rule, tags || [], { pinned: !!pinned, role: role || null });
     return { saved: true, rule, pinned: !!pinned, role: role || "all" };
   },
-  pin_lesson:   ({ id }) => pinLesson(id),
+  pin_lesson: ({ id }) => pinLesson(id),
   unpin_lesson: ({ id }) => unpinLesson(id),
   list_lessons: ({ role, pinned, tag, limit } = {}) => listLessons({ role, pinned, tag, limit }),
   clear_lessons: ({ mode, keyword }) => {
@@ -353,14 +381,15 @@ const toolMap = {
       discordSignalMode: ["screening", "discordSignalMode"],
       avoidPvpSymbols: ["screening", "avoidPvpSymbols"],
       blockPvpSymbols: ["screening", "blockPvpSymbols"],
-      maxBundlePct:     ["screening", "maxBundlePct"],
+      maxBundlePct: ["screening", "maxBundlePct"],
       maxBotHoldersPct: ["screening", "maxBotHoldersPct"],
       maxTop10Pct: ["screening", "maxTop10Pct"],
       allowedLaunchpads: ["screening", "allowedLaunchpads"],
       blockedLaunchpads: ["screening", "blockedLaunchpads"],
       minTokenAgeHours: ["screening", "minTokenAgeHours"],
       maxTokenAgeHours: ["screening", "maxTokenAgeHours"],
-      athFilterPct:     ["screening", "athFilterPct"],
+      athFilterPct: ["screening", "athFilterPct"],
+      maxVolatility: ["screening", "maxVolatility"],
       minFeePerTvl24h: ["management", "minFeePerTvl24h"],
       // management
       minClaimAmount: ["management", "minClaimAmount"],
@@ -426,7 +455,11 @@ const toolMap = {
       indicatorCandles: ["indicators", "candles", ["chartIndicators", "candles"]],
       rsiOversold: ["indicators", "rsiOversold", ["chartIndicators", "rsiOversold"]],
       rsiOverbought: ["indicators", "rsiOverbought", ["chartIndicators", "rsiOverbought"]],
-      requireAllIntervals: ["indicators", "requireAllIntervals", ["chartIndicators", "requireAllIntervals"]],
+      requireAllIntervals: [
+        "indicators",
+        "requireAllIntervals",
+        ["chartIndicators", "requireAllIntervals"],
+      ],
     };
 
     const applied = {};
@@ -434,17 +467,25 @@ const toolMap = {
 
     // Build case-insensitive lookup
     const CONFIG_MAP_LOWER = Object.fromEntries(
-      Object.entries(CONFIG_MAP).map(([k, v]) => [k.toLowerCase(), [k, v]])
+      Object.entries(CONFIG_MAP).map(([k, v]) => [k.toLowerCase(), [k, v]]),
     );
 
     if (!changes || typeof changes !== "object" || Array.isArray(changes)) {
       return { success: false, error: "changes must be an object", reason };
     }
 
-    const STRATEGY_BIN_KEYS = new Set(["binsBelow", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow"]);
+    const STRATEGY_BIN_KEYS = new Set([
+      "binsBelow",
+      "minBinsBelow",
+      "maxBinsBelow",
+      "defaultBinsBelow",
+    ]);
     for (const [key, val] of Object.entries(changes)) {
       const match = CONFIG_MAP[key] ? [key, CONFIG_MAP[key]] : CONFIG_MAP_LOWER[key.toLowerCase()];
-      if (!match) { unknown.push(key); continue; }
+      if (!match) {
+        unknown.push(key);
+        continue;
+      }
       try {
         let normalizedVal = val;
         if (STRATEGY_BIN_KEYS.has(match[0])) {
@@ -463,7 +504,10 @@ const toolMap = {
     }
 
     if (Object.keys(applied).length === 0) {
-      log("config", `update_config failed — unknown keys: ${JSON.stringify(unknown)}, raw changes: ${JSON.stringify(changes)}`);
+      log(
+        "config",
+        `update_config failed — unknown keys: ${JSON.stringify(unknown)}, raw changes: ${JSON.stringify(changes)}`,
+      );
       return { success: false, unknown, reason };
     }
 
@@ -481,7 +525,10 @@ const toolMap = {
       const [section, field] = CONFIG_MAP[key];
       const before = config[section][field];
       config[section][field] = val;
-      log("config", `update_config: config.${section}.${field} ${before} → ${val} (verify: ${config[section][field]})`);
+      log(
+        "config",
+        `update_config: config.${section}.${field} ${before} → ${val} (verify: ${config[section][field]})`,
+      );
     }
     if (
       applied.binsBelow != null ||
@@ -489,8 +536,14 @@ const toolMap = {
       applied.maxBinsBelow != null ||
       applied.defaultBinsBelow != null
     ) {
-      config.strategy.minBinsBelow = Math.max(MIN_SAFE_BINS_BELOW, Math.round(Number(config.strategy.minBinsBelow ?? MIN_SAFE_BINS_BELOW)));
-      config.strategy.maxBinsBelow = Math.max(config.strategy.minBinsBelow, Math.round(Number(config.strategy.maxBinsBelow ?? config.strategy.minBinsBelow)));
+      config.strategy.minBinsBelow = Math.max(
+        MIN_SAFE_BINS_BELOW,
+        Math.round(Number(config.strategy.minBinsBelow ?? MIN_SAFE_BINS_BELOW)),
+      );
+      config.strategy.maxBinsBelow = Math.max(
+        config.strategy.minBinsBelow,
+        Math.round(Number(config.strategy.maxBinsBelow ?? config.strategy.minBinsBelow)),
+      );
       config.strategy.defaultBinsBelow = Math.max(
         config.strategy.minBinsBelow,
         Math.min(
@@ -519,18 +572,22 @@ const toolMap = {
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
 
     // Restart cron jobs if intervals changed
-    const intervalChanged = applied.managementIntervalMin != null || applied.screeningIntervalMin != null;
+    const intervalChanged =
+      applied.managementIntervalMin != null || applied.screeningIntervalMin != null;
     if (intervalChanged && _cronRestarter) {
       _cronRestarter();
-      log("config", `Cron restarted — management: ${config.schedule.managementIntervalMin}m, screening: ${config.schedule.screeningIntervalMin}m`);
+      log(
+        "config",
+        `Cron restarted — management: ${config.schedule.managementIntervalMin}m, screening: ${config.schedule.screeningIntervalMin}m`,
+      );
     }
 
     // Skip repeated volatility-driven interval changes; they are operational tuning, not reusable lessons.
     const lessonsKeys = Object.keys(applied).filter(
-      k => k !== "managementIntervalMin" && k !== "screeningIntervalMin"
+      (k) => k !== "managementIntervalMin" && k !== "screeningIntervalMin",
     );
     if (lessonsKeys.length > 0) {
-      const summary = lessonsKeys.map(k => `${k}=${applied[k]}`).join(", ");
+      const summary = lessonsKeys.map((k) => `${k}=${applied[k]}`).join(", ");
       addLesson(`[SELF-TUNED] Changed ${summary} — ${reason}`, ["self_tune", "config_change"]);
     }
 
@@ -540,16 +597,8 @@ const toolMap = {
 };
 
 // Tools that modify on-chain state (need extra safety checks)
-const WRITE_TOOLS = new Set([
-  "deploy_position",
-  "claim_fees",
-  "close_position",
-  "swap_token",
-]);
-const PROTECTED_TOOLS = new Set([
-  ...WRITE_TOOLS,
-  "self_update",
-]);
+const WRITE_TOOLS = new Set(["deploy_position", "claim_fees", "close_position", "swap_token"]);
+const PROTECTED_TOOLS = new Set([...WRITE_TOOLS, "self_update"]);
 
 /**
  * Execute a tool call with safety checks and logging.
@@ -596,24 +645,65 @@ export async function executeTool(name, args) {
 
     if (success) {
       if (name === "swap_token" && result.tx) {
-        notifySwap({ inputSymbol: args.input_mint?.slice(0, 8), outputSymbol: args.output_mint === "So11111111111111111111111111111111111111112" || args.output_mint === "SOL" ? "SOL" : args.output_mint?.slice(0, 8), amountIn: result.amount_in, amountOut: result.amount_out, tx: result.tx }).catch(() => {});
+        notifySwap({
+          inputSymbol: args.input_mint?.slice(0, 8),
+          outputSymbol:
+            args.output_mint === "So11111111111111111111111111111111111111112" ||
+            args.output_mint === "SOL"
+              ? "SOL"
+              : args.output_mint?.slice(0, 8),
+          amountIn: result.amount_in,
+          amountOut: result.amount_out,
+          tx: result.tx,
+        }).catch(() => {});
       } else if (name === "deploy_position") {
-        notifyDeploy({ pair: result.pool_name || args.pool_name || args.pool_address?.slice(0, 8), amountSol: args.amount_y ?? args.amount_sol ?? 0, position: result.position, tx: result.txs?.[0] ?? result.tx, priceRange: result.price_range, rangeCoverage: result.range_coverage, binStep: result.bin_step, baseFee: result.base_fee }).catch(() => {});
+        const isDryRun = result.dry_run === true;
+        const poolName = isDryRun
+          ? result.would_deploy?.pool_address?.slice(0, 8) ||
+            args.pool_name ||
+            args.pool_address?.slice(0, 8)
+          : result.pool_name || args.pool_name || args.pool_address?.slice(0, 8);
+        notifyDeploy({
+          pair: poolName,
+          amountSol: args.amount_y ?? args.amount_sol ?? 0,
+          position: isDryRun ? "DRY RUN" : result.position,
+          tx: isDryRun ? "DRY RUN" : (result.txs?.[0] ?? result.tx),
+          priceRange: result.price_range,
+          rangeCoverage: result.range_coverage,
+          binStep: result.bin_step,
+          baseFee: result.base_fee,
+          dryRun: isDryRun,
+        }).catch(() => {});
       } else if (name === "close_position") {
-        notifyClose({ pair: result.pool_name || args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlPct: result.pnl_pct ?? 0 }).catch(() => {});
+        notifyClose({
+          pair: result.pool_name || args.position_address?.slice(0, 8),
+          pnlUsd: result.pnl_usd ?? 0,
+          pnlPct: result.pnl_pct ?? 0,
+        }).catch(() => {});
         // Note low-yield closes in pool memory so screener avoids redeploying
         if (args.reason && args.reason.toLowerCase().includes("yield")) {
           const poolAddr = result.pool || args.pool_address;
-          if (poolAddr) addPoolNote({ pool_address: poolAddr, note: `Closed: low yield (fee/TVL below threshold) at ${new Date().toISOString().slice(0,10)}` }).catch?.(() => {});
+          if (poolAddr)
+            addPoolNote({
+              pool_address: poolAddr,
+              note: `Closed: low yield (fee/TVL below threshold) at ${new Date().toISOString().slice(0, 10)}`,
+            }).catch?.(() => {});
         }
         // Auto-swap base token back to SOL unless user said to hold
         if (!args.skip_swap && result.base_mint) {
           try {
             const balances = await getWalletBalances({});
-            const token = balances.tokens?.find(t => t.mint === result.base_mint);
-            if (token && token.usd >= 0.10) {
-              log("executor", `Auto-swapping ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-              const swapResult = await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance });
+            const token = balances.tokens?.find((t) => t.mint === result.base_mint);
+            if (token && token.usd >= 0.1) {
+              log(
+                "executor",
+                `Auto-swapping ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`,
+              );
+              const swapResult = await swapToken({
+                input_mint: result.base_mint,
+                output_mint: "SOL",
+                amount: token.balance,
+              });
               // Tell the model the swap already happened so it doesn't call swap_token again
               result.auto_swapped = true;
               result.auto_swap_note = `Base token already auto-swapped back to SOL (${token.symbol || result.base_mint.slice(0, 8)} → SOL). Do NOT call swap_token again.`;
@@ -623,13 +713,24 @@ export async function executeTool(name, args) {
             log("executor_warn", `Auto-swap after close failed: ${e.message}`);
           }
         }
-      } else if (name === "claim_fees" && config.management.autoSwapAfterClaim && result.base_mint) {
+      } else if (
+        name === "claim_fees" &&
+        config.management.autoSwapAfterClaim &&
+        result.base_mint
+      ) {
         try {
           const balances = await getWalletBalances({});
-          const token = balances.tokens?.find(t => t.mint === result.base_mint);
-          if (token && token.usd >= 0.10) {
-            log("executor", `Auto-swapping claimed ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-            await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance });
+          const token = balances.tokens?.find((t) => t.mint === result.base_mint);
+          if (token && token.usd >= 0.1) {
+            log(
+              "executor",
+              `Auto-swapping claimed ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`,
+            );
+            await swapToken({
+              input_mint: result.base_mint,
+              output_mint: "SOL",
+              amount: token.balance,
+            });
           }
         } catch (e) {
           log("executor_warn", `Auto-swap after claim failed: ${e.message}`);
@@ -681,16 +782,25 @@ async function runSafetyChecks(name, args) {
       if (Number.isFinite(deployAmountX) && deployAmountX > 0) {
         return {
           pass: false,
-          reason: "This agent only supports single-side SOL deploys. Use amount_y/amount_sol and keep amount_x=0.",
+          reason:
+            "This agent only supports single-side SOL deploys. Use amount_y/amount_sol and keep amount_x=0.",
         };
       }
-      const requestedBinsBelow = Number(args.bins_below ?? config.strategy.defaultBinsBelow ?? config.strategy.minBinsBelow);
+      const requestedBinsBelow = Number(
+        args.bins_below ?? config.strategy.defaultBinsBelow ?? config.strategy.minBinsBelow,
+      );
       const requestedBinsAbove = Number(args.bins_above ?? 0);
-      const minBinsBelow = Math.max(MIN_SAFE_BINS_BELOW, Number(config.strategy.minBinsBelow ?? MIN_SAFE_BINS_BELOW));
+      const minBinsBelow = Math.max(
+        MIN_SAFE_BINS_BELOW,
+        Number(config.strategy.minBinsBelow ?? MIN_SAFE_BINS_BELOW),
+      );
       const isSingleSidedSol = deployAmountY > 0 && deployAmountX <= 0;
       const requestedTotalBins = requestedBinsBelow + requestedBinsAbove;
       const requestedVolatility = args.volatility == null ? null : Number(args.volatility);
-      if (args.volatility != null && (!Number.isFinite(requestedVolatility) || requestedVolatility <= 0)) {
+      if (
+        args.volatility != null &&
+        (!Number.isFinite(requestedVolatility) || requestedVolatility <= 0)
+      ) {
         return {
           pass: false,
           reason: `volatility ${args.volatility} is invalid. Refusing deploy because the volatility feed is unusable.`,
@@ -699,15 +809,13 @@ async function runSafetyChecks(name, args) {
       if (
         args.downside_pct == null &&
         args.upside_pct == null &&
-        (
-          !Number.isFinite(requestedBinsBelow) ||
+        (!Number.isFinite(requestedBinsBelow) ||
           !Number.isFinite(requestedBinsAbove) ||
           !Number.isInteger(requestedBinsBelow) ||
           !Number.isInteger(requestedBinsAbove) ||
           requestedBinsBelow < 0 ||
           requestedBinsAbove < 0 ||
-          requestedTotalBins < minBinsBelow
-        )
+          requestedTotalBins < minBinsBelow)
       ) {
         return {
           pass: false,
@@ -717,7 +825,9 @@ async function runSafetyChecks(name, args) {
       if (
         isSingleSidedSol &&
         args.downside_pct == null &&
-        (!Number.isFinite(requestedBinsBelow) || !Number.isInteger(requestedBinsBelow) || requestedBinsBelow < minBinsBelow)
+        (!Number.isFinite(requestedBinsBelow) ||
+          !Number.isInteger(requestedBinsBelow) ||
+          requestedBinsBelow < minBinsBelow)
       ) {
         return {
           pass: false,
@@ -727,7 +837,9 @@ async function runSafetyChecks(name, args) {
       if (
         isSingleSidedSol &&
         args.upside_pct == null &&
-        (!Number.isFinite(requestedBinsAbove) || !Number.isInteger(requestedBinsAbove) || requestedBinsAbove !== 0)
+        (!Number.isFinite(requestedBinsAbove) ||
+          !Number.isInteger(requestedBinsAbove) ||
+          requestedBinsAbove !== 0)
       ) {
         return {
           pass: false,
@@ -736,16 +848,23 @@ async function runSafetyChecks(name, args) {
       }
 
       // Check position count limit + duplicate pool guard — force fresh scan to avoid stale cache
+      // In dry run mode, also count virtual positions from state.json (on-chain is always 0)
       const positions = await getMyPositions({ force: true });
-      if (positions.total_positions >= config.risk.maxPositions) {
+      const trackedOpen = getTrackedPositions(true);
+      const effectiveCount = Math.max(positions.total_positions, trackedOpen.length);
+      if (effectiveCount >= config.risk.maxPositions) {
         return {
           pass: false,
-          reason: `Max positions (${config.risk.maxPositions}) reached. Close a position first.`,
+          reason: `Max positions (${config.risk.maxPositions}) reached (${effectiveCount} open). Close a position first.`,
         };
       }
-      const alreadyInPool = positions.positions.some(
-        (p) => p.pool === args.pool_address
-      );
+      const allOpenPositions = positions.positions || [];
+      // Merge tracked virtual positions for duplicate checks
+      const trackedPools = trackedOpen.map((p) => p.pool || p.pool_address);
+      const trackedMints = trackedOpen.map((p) => p.base_mint).filter(Boolean);
+      const alreadyInPool =
+        allOpenPositions.some((p) => p.pool === args.pool_address) ||
+        trackedPools.includes(args.pool_address);
       if (alreadyInPool) {
         return {
           pass: false,
@@ -755,9 +874,9 @@ async function runSafetyChecks(name, args) {
 
       // Block same base token across different pools
       if (args.base_mint) {
-        const alreadyHasMint = positions.positions.some(
-          (p) => p.base_mint === args.base_mint
-        );
+        const alreadyHasMint =
+          allOpenPositions.some((p) => p.base_mint === args.base_mint) ||
+          trackedMints.includes(args.base_mint);
         if (alreadyHasMint) {
           return {
             pass: false,
@@ -815,13 +934,15 @@ async function runSafetyChecks(name, args) {
       if (process.env.ALLOW_SELF_UPDATE !== "true") {
         return {
           pass: false,
-          reason: "self_update is disabled by default. Set ALLOW_SELF_UPDATE=true locally if you really want to enable it.",
+          reason:
+            "self_update is disabled by default. Set ALLOW_SELF_UPDATE=true locally if you really want to enable it.",
         };
       }
       if (!process.stdin.isTTY) {
         return {
           pass: false,
-          reason: "self_update is only allowed from a local interactive TTY session, not from Telegram or background automation.",
+          reason:
+            "self_update is only allowed from a local interactive TTY session, not from Telegram or background automation.",
         };
       }
       return { pass: true };

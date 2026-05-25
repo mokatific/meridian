@@ -9,7 +9,11 @@ const DEFAULT_CANDLES = 298;
 function normalizeIntervals(intervals) {
   const list = Array.isArray(intervals) ? intervals : DEFAULT_INTERVALS;
   return list
-    .map((value) => String(value || "").trim().toUpperCase())
+    .map((value) =>
+      String(value || "")
+        .trim()
+        .toUpperCase(),
+    )
     .filter((value) => value === "5_MINUTE" || value === "15_MINUTE");
 }
 
@@ -70,13 +74,27 @@ function evaluatePreset(side, preset, payload) {
     case "supertrend_break":
       return side === "entry"
         ? {
-            confirmed: summary.supertrendBreakUp || (isBullish && close != null && summary.supertrendValue != null && close >= summary.supertrendValue),
-            reason: summary.supertrendBreakUp ? "Supertrend flipped bullish" : "Price is above bullish Supertrend",
+            confirmed:
+              summary.supertrendBreakUp ||
+              (isBullish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close >= summary.supertrendValue),
+            reason: summary.supertrendBreakUp
+              ? "Supertrend flipped bullish"
+              : "Price is above bullish Supertrend",
             signal: summary,
           }
         : {
-            confirmed: summary.supertrendBreakDown || (isBearish && close != null && summary.supertrendValue != null && close <= summary.supertrendValue),
-            reason: summary.supertrendBreakDown ? "Supertrend flipped bearish" : "Price is below bearish Supertrend",
+            confirmed:
+              summary.supertrendBreakDown ||
+              (isBearish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close <= summary.supertrendValue),
+            reason: summary.supertrendBreakDown
+              ? "Supertrend flipped bearish"
+              : "Price is below bearish Supertrend",
             signal: summary,
           };
     case "rsi_reversal":
@@ -106,16 +124,13 @@ function evaluatePreset(side, preset, payload) {
     case "rsi_plus_supertrend":
       return side === "entry"
         ? {
-            confirmed:
-              (rsi != null && rsi <= oversold) &&
-              (summary.supertrendBreakUp || isBullish),
+            confirmed: rsi != null && rsi <= oversold && (summary.supertrendBreakUp || isBullish),
             reason: `RSI oversold with bullish Supertrend context`,
             signal: summary,
           }
         : {
             confirmed:
-              (rsi != null && rsi >= overbought) &&
-              (summary.supertrendBreakDown || isBearish),
+              rsi != null && rsi >= overbought && (summary.supertrendBreakDown || isBearish),
             reason: `RSI overbought with bearish Supertrend context`,
             signal: summary,
           };
@@ -124,7 +139,10 @@ function evaluatePreset(side, preset, payload) {
         ? {
             confirmed:
               summary.supertrendBreakUp ||
-              (isBullish && close != null && summary.supertrendValue != null && close >= summary.supertrendValue) ||
+              (isBullish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close >= summary.supertrendValue) ||
               (rsi != null && rsi <= oversold),
             reason: "Supertrend bullish confirmation or RSI oversold",
             signal: summary,
@@ -132,7 +150,10 @@ function evaluatePreset(side, preset, payload) {
         : {
             confirmed:
               summary.supertrendBreakDown ||
-              (isBearish && close != null && summary.supertrendValue != null && close <= summary.supertrendValue) ||
+              (isBearish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close <= summary.supertrendValue) ||
               (rsi != null && rsi >= overbought),
             reason: "Supertrend bearish confirmation or RSI overbought",
             signal: summary,
@@ -163,25 +184,19 @@ function evaluatePreset(side, preset, payload) {
       return side === "entry"
         ? {
             confirmed:
-              crossedUp(summary.fib618) ||
-              crossedUp(summary.fib50) ||
-              crossedUp(summary.fib786),
+              crossedUp(summary.fib618) || crossedUp(summary.fib50) || crossedUp(summary.fib786),
             reason: "Price reclaimed a key Fibonacci level",
             signal: summary,
           }
         : {
-            confirmed:
-              crossedUp(summary.fib618) ||
-              crossedUp(summary.fib50),
+            confirmed: crossedUp(summary.fib618) || crossedUp(summary.fib50),
             reason: "Price reclaimed a key Fibonacci level upward",
             signal: summary,
           };
     case "fibo_reject":
       return side === "entry"
         ? {
-            confirmed:
-              crossedDown(summary.fib618) ||
-              crossedDown(summary.fib50),
+            confirmed: crossedDown(summary.fib618) || crossedDown(summary.fib50),
             reason: "Price rejected from a key Fibonacci level",
             signal: summary,
           }
@@ -211,7 +226,9 @@ async function fetchChartIndicatorsForMint(
     refresh = false,
   } = {},
 ) {
-  const normalizedInterval = String(interval || "15_MINUTE").trim().toUpperCase();
+  const normalizedInterval = String(interval || "15_MINUTE")
+    .trim()
+    .toUpperCase();
   const search = new URLSearchParams({
     interval: normalizedInterval,
     candles: String(candles),
@@ -232,12 +249,22 @@ export async function confirmIndicatorPreset({
   refresh = false,
 } = {}) {
   if (!config.indicators.enabled || !mint || !preset) {
-    return { enabled: false, confirmed: true, reason: "Indicators disabled or not configured", intervals: [] };
+    return {
+      enabled: false,
+      confirmed: true,
+      reason: "Indicators disabled or not configured",
+      intervals: [],
+    };
   }
 
   const targets = normalizeIntervals(intervals);
   if (targets.length === 0) {
-    return { enabled: false, confirmed: true, reason: "No indicator intervals configured", intervals: [] };
+    return {
+      enabled: false,
+      confirmed: true,
+      reason: "No indicator intervals configured",
+      intervals: [],
+    };
   }
 
   const results = [];
@@ -254,7 +281,10 @@ export async function confirmIndicatorPreset({
         latest: payload?.latest || null,
       });
     } catch (error) {
-      log("indicators_warn", `Indicator fetch failed for ${mint.slice(0, 8)} ${interval}: ${error.message}`);
+      log(
+        "indicators_warn",
+        `Indicator fetch failed for ${mint.slice(0, 8)} ${interval}: ${error.message}`,
+      );
       results.push({
         interval,
         ok: false,
@@ -292,7 +322,10 @@ export async function confirmIndicatorPreset({
     side,
     requireAllIntervals: requireAll,
     reason: confirmed
-      ? `${preset} confirmed on ${successful.filter((entry) => entry.confirmed).map((entry) => entry.interval).join(", ")}`
+      ? `${preset} confirmed on ${successful
+          .filter((entry) => entry.confirmed)
+          .map((entry) => entry.interval)
+          .join(", ")}`
       : `${preset} not confirmed on ${successful.map((entry) => entry.interval).join(", ")}`,
     intervals: results,
   };

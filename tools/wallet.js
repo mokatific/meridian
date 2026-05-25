@@ -8,12 +8,13 @@ import {
 import bs58 from "bs58";
 import { log } from "../logger.js";
 import { config } from "../config.js";
+import { createCachedConnection } from "../utils/rpc-cache.js";
 
 let _connection = null;
 let _wallet = null;
 
 function getConnection() {
-  if (!_connection) _connection = new Connection(process.env.RPC_URL, "confirmed");
+  if (!_connection) _connection = createCachedConnection(process.env.RPC_URL, "confirmed");
   return _connection;
 }
 
@@ -25,13 +26,10 @@ function getWallet() {
   return _wallet;
 }
 
+import { fetchWithJupiterKey } from "../utils/jupiter-keys.js";
+
 const JUPITER_PRICE_API = "https://api.jup.ag/price/v3";
 const JUPITER_SWAP_V2_API = "https://api.jup.ag/swap/v2";
-const DEFAULT_JUPITER_API_KEY = "b15d42e9-e0e4-4f90-a424-ae41ceeaa382";
-
-function getJupiterApiKey() {
-  return config.jupiter.apiKey || process.env.JUPITER_API_KEY || DEFAULT_JUPITER_API_KEY;
-}
 
 function getJupiterReferralParams() {
   const referralAccount = String(config.jupiter.referralAccount || "").trim();
@@ -61,19 +59,37 @@ export async function getWalletBalances() {
   try {
     walletAddress = getWallet().publicKey.toString();
   } catch {
-    return { wallet: null, sol: 0, sol_price: 0, sol_usd: 0, usdc: 0, tokens: [], total_usd: 0, error: "Wallet not configured" };
+    return {
+      wallet: null,
+      sol: 0,
+      sol_price: 0,
+      sol_usd: 0,
+      usdc: 0,
+      tokens: [],
+      total_usd: 0,
+      error: "Wallet not configured",
+    };
   }
 
   const HELIUS_KEY = process.env.HELIUS_API_KEY;
   if (!HELIUS_KEY) {
     log("wallet_error", "HELIUS_API_KEY not set in .env");
-    return { wallet: walletAddress, sol: 0, sol_price: 0, sol_usd: 0, usdc: 0, tokens: [], total_usd: 0, error: "Helius API key missing" };
+    return {
+      wallet: walletAddress,
+      sol: 0,
+      sol_price: 0,
+      sol_usd: 0,
+      usdc: 0,
+      tokens: [],
+      total_usd: 0,
+      error: "Helius API key missing",
+    };
   }
 
   try {
     const url = `https://api.helius.xyz/v1/wallet/${walletAddress}/balances?api-key=${HELIUS_KEY}`;
     const res = await fetch(url);
-    
+
     if (!res.ok) {
       throw new Error(`Helius API error: ${res.status} ${res.statusText}`);
     }
@@ -82,8 +98,8 @@ export async function getWalletBalances() {
     const balances = data.balances || [];
 
     // ─── Find SOL and USDC ────────────────────────────────────
-    const solEntry = balances.find(b => b.mint === config.tokens.SOL || b.symbol === "SOL");
-    const usdcEntry = balances.find(b => b.mint === config.tokens.USDC || b.symbol === "USDC");
+    const solEntry = balances.find((b) => b.mint === config.tokens.SOL || b.symbol === "SOL");
+    const usdcEntry = balances.find((b) => b.mint === config.tokens.USDC || b.symbol === "USDC");
 
     const solBalance = solEntry?.balance || 0;
     const solPrice = solEntry?.pricePerToken || 0;
@@ -91,7 +107,7 @@ export async function getWalletBalances() {
     const usdcBalance = usdcEntry?.balance || 0;
 
     // ─── Map all tokens ───────────────────────────────────────
-    const enrichedTokens = balances.map(b => ({
+    const enrichedTokens = balances.map((b) => ({
       mint: b.mint,
       symbol: b.symbol || b.mint.slice(0, 8),
       balance: b.balance,
@@ -132,9 +148,9 @@ export function normalizeMint(mint) {
   if (!mint) return mint;
   const SOL_MINT = "So11111111111111111111111111111111111111112";
   if (
-    mint === "SOL" || 
-    mint === "native" || 
-    /^So1+$/.test(mint) || 
+    mint === "SOL" ||
+    mint === "native" ||
+    /^So1+$/.test(mint) ||
     (mint.length >= 32 && mint.length <= 44 && mint.startsWith("So1") && mint !== SOL_MINT)
   ) {
     return SOL_MINT;
@@ -142,12 +158,8 @@ export function normalizeMint(mint) {
   return mint;
 }
 
-export async function swapToken({
-  input_mint,
-  output_mint,
-  amount,
-}) {
-  input_mint  = normalizeMint(input_mint);
+export async function swapToken({ input_mint, output_mint, amount }) {
+  input_mint = normalizeMint(input_mint);
   output_mint = normalizeMint(output_mint);
 
   if (process.env.DRY_RUN === "true") {
@@ -184,11 +196,8 @@ export async function swapToken({
       search.set("referralFee", String(referralParams.referralFee));
     }
     const orderUrl = `${JUPITER_SWAP_V2_API}/order?${search.toString()}`;
-    const jupiterApiKey = getJupiterApiKey();
 
-    const orderRes = await fetch(orderUrl, {
-      headers: jupiterApiKey ? { "x-api-key": jupiterApiKey } : {},
-    });
+    const orderRes = await fetchWithJupiterKey(orderUrl);
     if (!orderRes.ok) {
       const body = await orderRes.text();
       throw new Error(`Swap V2 order failed: ${orderRes.status} ${body}`);
@@ -207,12 +216,9 @@ export async function swapToken({
     const signedTx = Buffer.from(tx.serialize()).toString("base64");
 
     // ─── Execute ───────────────────────────────────────────────
-    const execRes = await fetch(`${JUPITER_SWAP_V2_API}/execute`, {
+    const execRes = await fetchWithJupiterKey(`${JUPITER_SWAP_V2_API}/execute`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(jupiterApiKey ? { "x-api-key": jupiterApiKey } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ signedTransaction: signedTx, requestId }),
     });
     if (!execRes.ok) {

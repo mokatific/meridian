@@ -1,11 +1,16 @@
+import { rateLimitedDataPiFetch } from "../utils/datapi-limiter.js";
+import { searchTokenOfficial, mapOfficialToScreening } from "./jupiter-official.js";
+import { log } from "../logger.js";
+
 const DATAPI_BASE = "https://datapi.jup.ag/v1";
 
 /**
  * Get the narrative/story behind a token from Jupiter ChainInsight.
  * Useful for understanding if a token has a real community/theme vs nothing.
+ * NOTE: No official alternative — still uses datapi.jup.ag with rate limiter.
  */
 export async function getTokenNarrative({ mint }) {
-  const res = await fetch(`${DATAPI_BASE}/chaininsight/narrative/${mint}`);
+  const res = await rateLimitedDataPiFetch(`${DATAPI_BASE}/chaininsight/narrative/${mint}`);
   if (!res.ok) throw new Error(`Narrative API error: ${res.status}`);
   const data = await res.json();
   return {
@@ -17,11 +22,67 @@ export async function getTokenNarrative({ mint }) {
 
 /**
  * Search for token data by name, symbol, or mint address.
- * Returns condensed token info useful for confidence scoring.
+ * Primary: official Jupiter Tokens v2 API (api.jup.ag with API key)
+ * Fallback: datapi.jup.ag (rate limited)
  */
 export async function getTokenInfo({ query }) {
+  // Try official API first
+  try {
+    const tokens = await searchTokenOfficial({ query });
+    if (tokens.length > 0) {
+      const results = tokens.slice(0, 5).map(mapOfficialToScreening);
+      // Enrich first result with OKX smart money + risk data
+      if (results[0]?.mint) {
+        const { getAdvancedInfo, getClusterList } = await import("./okx.js");
+        const [adv, clusters, feesData] = await Promise.all([
+          getAdvancedInfo(results[0].mint).catch(() => null),
+          getClusterList(results[0].mint).catch(() => []),
+          // global_fees_sol not available in official API — fetch from datapi
+          rateLimitedDataPiFetch(
+            `${DATAPI_BASE}/assets/search?query=${encodeURIComponent(results[0].mint)}`,
+          )
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => {
+              const t = Array.isArray(d) ? d[0] : d;
+              return t?.fees != null ? parseFloat(t.fees.toFixed(2)) : null;
+            })
+            .catch(() => null),
+        ]);
+        if (adv) {
+          results[0].risk_level = adv.risk_level;
+          results[0].bundle_pct = adv.bundle_pct;
+          results[0].sniper_pct = adv.sniper_pct;
+          results[0].suspicious_pct = adv.suspicious_pct;
+          results[0].new_wallet_pct = adv.new_wallet_pct;
+          results[0].smart_money_buy = adv.smart_money_buy;
+          results[0].tags = adv.tags;
+          // Fallback: use OKX total_fee_sol if datapi fails
+          if (adv.total_fee_sol != null && results[0].global_fees_sol == null) {
+            results[0].global_fees_sol = adv.total_fee_sol;
+          }
+        }
+        if (clusters?.length) {
+          results[0].kol_in_clusters = clusters.some((c) => c.has_kol);
+          results[0].top_cluster_trend = clusters[0]?.trend ?? null;
+          results[0].clusters = clusters;
+        }
+        if (feesData != null) {
+          results[0].global_fees_sol = feesData;
+        }
+      }
+      return { found: true, query, results };
+    }
+    return { found: false, query };
+  } catch (e) {
+    log(
+      "token_warn",
+      `Official Jupiter API failed for ${query}, falling back to datapi: ${e.message}`,
+    );
+  }
+
+  // Fallback to datapi.jup.ag (rate limited)
   const url = `${DATAPI_BASE}/assets/search?query=${encodeURIComponent(query)}`;
-  const res = await fetch(url);
+  const res = await rateLimitedDataPiFetch(url);
   if (!res.ok) throw new Error(`Token search API error: ${res.status}`);
   const data = await res.json();
   const tokens = Array.isArray(data) ? data : [data];
@@ -40,25 +101,28 @@ export async function getTokenInfo({ query }) {
     launchpad: t.launchpad,
     graduated: !!t.graduatedPool,
     global_fees_sol: t.fees != null ? parseFloat(t.fees.toFixed(2)) : null,
-    audit: t.audit ? {
-      mint_disabled: t.audit.mintAuthorityDisabled,
-      freeze_disabled: t.audit.freezeAuthorityDisabled,
-      top_holders_pct: t.audit.topHoldersPercentage?.toFixed(2),
-      bot_holders_pct: t.audit.botHoldersPercentage?.toFixed(2),
-      dev_migrations: t.audit.devMigrations,
-    } : null,
-    stats_1h: t.stats1h ? {
-      price_change: t.stats1h.priceChange?.toFixed(2),
-      buy_vol: t.stats1h.buyVolume?.toFixed(0),
-      sell_vol: t.stats1h.sellVolume?.toFixed(0),
-      buyers: t.stats1h.numOrganicBuyers,
-      net_buyers: t.stats1h.numNetBuyers,
-    } : null,
-    // stats_24h omitted — misleading for short-timeframe LP (reflects full pump history)
-    stats_24h_net_buyers: t.stats24h ? t.stats24h.numNetBuyers : null, // keep only net buyer direction
+    audit: t.audit
+      ? {
+          mint_disabled: t.audit.mintAuthorityDisabled,
+          freeze_disabled: t.audit.freezeAuthorityDisabled,
+          top_holders_pct: t.audit.topHoldersPercentage?.toFixed(2),
+          bot_holders_pct: t.audit.botHoldersPercentage?.toFixed(2),
+          dev_migrations: t.audit.devMigrations,
+        }
+      : null,
+    stats_1h: t.stats1h
+      ? {
+          price_change: t.stats1h.priceChange?.toFixed(2),
+          buy_vol: t.stats1h.buyVolume?.toFixed(0),
+          sell_vol: t.stats1h.sellVolume?.toFixed(0),
+          buyers: t.stats1h.numOrganicBuyers,
+          net_buyers: t.stats1h.numNetBuyers,
+        }
+      : null,
+    stats_24h_net_buyers: t.stats24h ? t.stats24h.numNetBuyers : null,
   }));
 
-  // Enrich first result with OKX smart money + risk data (public endpoint, no key needed)
+  // Enrich first result with OKX smart money + risk data
   if (results[0]?.mint) {
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
     const [adv, clusters] = await Promise.all([
@@ -66,18 +130,22 @@ export async function getTokenInfo({ query }) {
       getClusterList(results[0].mint).catch(() => []),
     ]);
     if (adv) {
-      results[0].risk_level      = adv.risk_level;
-      results[0].bundle_pct      = adv.bundle_pct;
-      results[0].sniper_pct      = adv.sniper_pct;
-      results[0].suspicious_pct  = adv.suspicious_pct;
-      results[0].new_wallet_pct  = adv.new_wallet_pct;
+      results[0].risk_level = adv.risk_level;
+      results[0].bundle_pct = adv.bundle_pct;
+      results[0].sniper_pct = adv.sniper_pct;
+      results[0].suspicious_pct = adv.suspicious_pct;
+      results[0].new_wallet_pct = adv.new_wallet_pct;
       results[0].smart_money_buy = adv.smart_money_buy;
-      results[0].tags            = adv.tags;
+      results[0].tags = adv.tags;
+      // Fallback: use OKX total_fee_sol if datapi fails
+      if (adv.total_fee_sol != null && results[0].global_fees_sol == null) {
+        results[0].global_fees_sol = adv.total_fee_sol;
+      }
     }
     if (clusters?.length) {
-      results[0].kol_in_clusters   = clusters.some((c) => c.has_kol);
+      results[0].kol_in_clusters = clusters.some((c) => c.has_kol);
       results[0].top_cluster_trend = clusters[0]?.trend ?? null;
-      results[0].clusters          = clusters;
+      results[0].clusters = clusters;
     }
   }
 
@@ -91,8 +159,8 @@ export async function getTokenInfo({ query }) {
 export async function getTokenHolders({ mint, limit = 20 }) {
   // Fetch holders and total supply in parallel
   const [holdersRes, tokenRes] = await Promise.all([
-    fetch(`${DATAPI_BASE}/holders/${mint}?limit=100`),
-    fetch(`${DATAPI_BASE}/assets/search?query=${mint}`),
+    rateLimitedDataPiFetch(`${DATAPI_BASE}/holders/${mint}?limit=100`),
+    rateLimitedDataPiFetch(`${DATAPI_BASE}/assets/search?query=${mint}`),
   ]);
   if (!holdersRes.ok) throw new Error(`Holders API error: ${holdersRes.status}`);
   const data = await holdersRes.json();
@@ -100,12 +168,14 @@ export async function getTokenHolders({ mint, limit = 20 }) {
   const tokenInfo = Array.isArray(tokenData) ? tokenData[0] : tokenData;
   const totalSupply = tokenInfo?.totalSupply || tokenInfo?.circSupply || null;
 
-  const holders = Array.isArray(data) ? data : (data.holders || data.data || []);
+  const holders = Array.isArray(data) ? data : data.holders || data.data || [];
 
   const mapped = holders.slice(0, Math.min(limit, 100)).map((h) => {
     const tags = (h.tags || []).map((t) => t.name || t.id || t);
     const isPool = tags.some((t) => /pool|amm|liquidity|raydium|orca|meteora/i.test(t));
-    const pct = totalSupply ? (Number(h.amount) / totalSupply) * 100 : (h.percentage ?? h.pct ?? null);
+    const pct = totalSupply
+      ? (Number(h.amount) / totalSupply) * 100
+      : (h.percentage ?? h.pct ?? null);
     return {
       address: h.address || h.wallet,
       amount: h.amount,
@@ -113,11 +183,13 @@ export async function getTokenHolders({ mint, limit = 20 }) {
       sol_balance: h.solBalanceDisplay ?? h.solBalance,
       tags: tags.length ? tags : undefined,
       is_pool: isPool || undefined,
-      funding: h.addressInfo?.fundingAddress ? {
-        address: h.addressInfo.fundingAddress,
-        amount: h.addressInfo.fundingAmount,
-        slot: h.addressInfo.fundingSlot,
-      } : undefined,
+      funding: h.addressInfo?.fundingAddress
+        ? {
+            address: h.addressInfo.fundingAddress,
+            amount: h.addressInfo.fundingAmount,
+            slot: h.addressInfo.fundingSlot,
+          }
+        : undefined,
     };
   });
 
@@ -139,70 +211,108 @@ export async function getTokenHolders({ mint, limit = 20 }) {
 
   if (smartWallets.length > 0) {
     const addresses = smartWallets.map((w) => w.address).join(",");
-    const kwRes = await fetch(
-      `${DATAPI_BASE}/holders/${mint}?addresses=${addresses}`
-    ).catch(() => null);
+    const kwRes = await fetch(`${DATAPI_BASE}/holders/${mint}?addresses=${addresses}`).catch(
+      () => null,
+    );
     const kwData = kwRes?.ok ? await kwRes.json() : null;
-    const kwHolders = Array.isArray(kwData) ? kwData : (kwData?.holders || kwData?.data || []);
+    const kwHolders = Array.isArray(kwData) ? kwData : kwData?.holders || kwData?.data || [];
 
     const smartWalletMap = new Map(smartWallets.map((w) => [w.address, w]));
     const matchedHolders = kwHolders
       .map((h) => ({ ...h, addr: h.address || h.wallet }))
       .filter((h) => smartWalletMap.has(h.addr));
 
-    await Promise.all(matchedHolders.map(async (h) => {
-      const wallet = smartWalletMap.get(h.addr);
-      const pct = totalSupply ? parseFloat(((Number(h.amount) / totalSupply) * 100).toFixed(4)) : null;
+    await Promise.all(
+      matchedHolders.map(async (h) => {
+        const wallet = smartWalletMap.get(h.addr);
+        const pct = totalSupply
+          ? parseFloat(((Number(h.amount) / totalSupply) * 100).toFixed(4))
+          : null;
 
-      let pnl = null;
-      try {
-        const pnlRes = await fetch(`${DATAPI_BASE}/pnl-positions?address=${h.addr}&assetId=${mint}`);
-        if (pnlRes.ok) {
-          const pnlData = await pnlRes.json();
-          const pos = pnlData?.[h.addr]?.tokenPositions?.[0];
-          if (pos) pnl = {
-            balance: pos.balance,
-            balance_usd: pos.balanceValue,
-            avg_cost: pos.averageCost,
-            realized_pnl: pos.realizedPnl,
-            unrealized_pnl: pos.unrealizedPnl,
-            total_pnl: pos.totalPnl,
-            total_pnl_pct: pos.totalPnlPercentage,
-            buys: pos.totalBuys,
-            sells: pos.totalSells,
-            wins: pos.totalWins,
-            bought_value: pos.boughtValue,
-            sold_value: pos.soldValue,
-            first_active: pos.firstActiveTime,
-            last_active: pos.lastActiveTime,
-            holding_days: pos.holdingPeriodInSeconds ? Math.round(pos.holdingPeriodInSeconds / 86400) : null,
-          };
+        let pnl = null;
+        try {
+          const pnlRes = await rateLimitedDataPiFetch(
+            `${DATAPI_BASE}/pnl-positions?address=${h.addr}&assetId=${mint}`,
+          );
+          if (pnlRes.ok) {
+            const pnlData = await pnlRes.json();
+            const pos = pnlData?.[h.addr]?.tokenPositions?.[0];
+            if (pos)
+              pnl = {
+                balance: pos.balance,
+                balance_usd: pos.balanceValue,
+                avg_cost: pos.averageCost,
+                realized_pnl: pos.realizedPnl,
+                unrealized_pnl: pos.unrealizedPnl,
+                total_pnl: pos.totalPnl,
+                total_pnl_pct: pos.totalPnlPercentage,
+                buys: pos.totalBuys,
+                sells: pos.totalSells,
+                wins: pos.totalWins,
+                bought_value: pos.boughtValue,
+                sold_value: pos.soldValue,
+                first_active: pos.firstActiveTime,
+                last_active: pos.lastActiveTime,
+                holding_days: pos.holdingPeriodInSeconds
+                  ? Math.round(pos.holdingPeriodInSeconds / 86400)
+                  : null,
+              };
+          }
+        } catch {
+          /* ignore */
         }
-      } catch { /* ignore */ }
 
-      smartWalletsHolding.push({
-        name: wallet.name,
-        category: wallet.category,
-        address: h.addr,
-        pct,
-        sol_balance: h.solBalanceDisplay ?? h.solBalance,
-        pnl,
-      });
-    }));
+        smartWalletsHolding.push({
+          name: wallet.name,
+          category: wallet.category,
+          address: h.addr,
+          pct,
+          sol_balance: h.solBalanceDisplay ?? h.solBalance,
+          pnl,
+        });
+      }),
+    );
   }
+
+  const feesFromDatapi = tokenInfo?.fees != null ? parseFloat(tokenInfo.fees.toFixed(2)) : null;
+  // Fallback: use OKX total_fee_sol if datapi fails
+  const globalFeesSol = feesFromDatapi ?? advancedData?.total_fee_sol ?? null;
+
+  // ─── Deep Holder Analysis — aggregate signals ──────────────────
+  const hasInsiderSignals =
+    (advancedData?.sniper_pct ?? 0) > 10 ||
+    (advancedData?.suspicious_pct ?? 0) > 20 ||
+    (advancedData?.bundle_pct ?? 0) > 15;
+  const hasHighFreshWallets = (advancedData?.new_wallet_pct ?? 0) > 30;
+  const hasSmartMoneyBuyers = advancedData?.smart_money_buy === true;
+  const hasDevRugHistory = (advancedData?.dev_rug_count ?? 0) > 0;
+  const hasKOLClusters = clusterList?.some((c) => c.has_kol) || false;
 
   return {
     mint,
-    global_fees_sol: tokenInfo?.fees != null ? parseFloat(tokenInfo.fees.toFixed(2)) : null,
+    global_fees_sol: globalFeesSol,
     total_fetched: holders.length,
     showing: mapped.length,
     top_10_real_holders_pct: top10Pct.toFixed(2),
     // OKX advanced info
-    risk_level:     advancedData?.risk_level     ?? null,  // 1=low..5=high
-    bundle_pct:     advancedData?.bundle_pct     ?? null,
-    sniper_pct:     advancedData?.sniper_pct     ?? null,
+    risk_level: advancedData?.risk_level ?? null, // 1=low..5=high
+    bundle_pct: advancedData?.bundle_pct ?? null,
+    sniper_pct: advancedData?.sniper_pct ?? null,
     suspicious_pct: advancedData?.suspicious_pct ?? null,
-    new_wallet_pct: advancedData?.new_wallet_pct ?? null,  // high = rug signal
+    new_wallet_pct: advancedData?.new_wallet_pct ?? null, // high = rug signal
+    dev_rug_count: advancedData?.dev_rug_count ?? null,
+    dev_token_count: advancedData?.dev_token_count ?? null,
+    smart_money_buy: advancedData?.smart_money_buy ?? false,
+    // Deep holder analysis summary
+    holder_deep_analysis: {
+      has_insider_signals: hasInsiderSignals,
+      has_high_fresh_wallets: hasHighFreshWallets,
+      has_smart_money_buyers: hasSmartMoneyBuyers,
+      has_dev_rug_history: hasDevRugHistory,
+      has_kol_clusters: hasKOLClusters,
+      kol_in_clusters: clusterList?.some((c) => c.has_kol) || false,
+      top_cluster_trend: clusterList?.[0]?.trend ?? null,
+    },
     smart_wallets_holding: smartWalletsHolding,
     holders: mapped,
   };
