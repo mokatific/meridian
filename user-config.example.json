@@ -6,6 +6,11 @@
   "llmModel": "minimax/minimax-m2.7",
   "dryRun": true,
 
+  "initialVirtualBalance": 0.65,
+  "slippagePct": 2,
+  "gasFeePerDeploy": 0.005,
+  "gasFeePerClose": 0.002,
+
   "deployAmountSol": 0.5,
   "maxPositions": 3,
   "minSolToOpen": 0.55,
