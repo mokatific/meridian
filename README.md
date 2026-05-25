@@ -51,7 +51,7 @@ The agent is powered via **OpenRouter** or other compatible providers and models
 ## Requirements
 
 - Node.js 18+
-- [OpenRouter](https://openrouter.ai) API key (or SwiftRouter / other compatible provider)
+- [OpenRouter](https://openrouter.ai) API key (or [SwiftRouter](https://swiftrouter.com/?auth=signup&ref=H8D935KD4J) / other compatible provider)
 - Solana wallet (base58 private key)
 - Solana RPC endpoint ([Helius](https://helius.xyz) recommended)
 - Telegram bot token (optional)
