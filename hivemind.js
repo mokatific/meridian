@@ -141,7 +141,9 @@ function normalizeSharedLesson(lesson) {
   return {
     id: lesson.id || lesson.lessonId || `shared_${Date.now()}`,
     rule,
-    tags: Array.isArray(lesson.tags) ? lesson.tags.map((tag) => sanitizeText(tag, 48)).filter(Boolean) : [],
+    tags: Array.isArray(lesson.tags)
+      ? lesson.tags.map((tag) => sanitizeText(tag, 48)).filter(Boolean)
+      : [],
     role: sanitizeText(lesson.role || "", 20) || null,
     outcome: sanitizeText(lesson.outcome || "shared", 20) || "shared",
     sourceType: sanitizeText(lesson.sourceType || lesson.source || "shared", 24) || "shared",
@@ -161,7 +163,10 @@ export function getSharedLessonsForPrompt({ agentType = "GENERAL", maxLessons = 
 
   if (!shared.length) return null;
   return shared
-    .map((lesson) => `[HIVEMIND${lesson.score != null ? ` score=${lesson.score}` : ""}] ${lesson.rule}`)
+    .map(
+      (lesson) =>
+        `[HIVEMIND${lesson.score != null ? ` score=${lesson.score}` : ""}] ${lesson.rule}`,
+    )
     .join("\n");
 }
 
@@ -226,6 +231,10 @@ export async function pullHiveMindPresets() {
 
 export async function bootstrapHiveMind() {
   if (!isHiveMindEnabled()) return null;
+  if (getPullMode() === "manual") {
+    log("hivemind", "HiveMind disabled (manual mode) — skipping registration & background sync");
+    return { enabled: false, reason: "manual mode" };
+  }
   ensureAgentId();
   const tasks = [registerHiveMindAgent({ reason: "startup" })];
   if (getPullMode() === "auto") {
@@ -237,6 +246,7 @@ export async function bootstrapHiveMind() {
 
 export function startHiveMindBackgroundSync() {
   if (!isHiveMindEnabled() || _heartbeatTimer) return null;
+  if (getPullMode() === "manual") return null;
   _heartbeatTimer = setInterval(() => {
     const tasks = [registerHiveMindAgent({ reason: "heartbeat" })];
     if (getPullMode() === "auto") {
@@ -250,7 +260,8 @@ export function startHiveMindBackgroundSync() {
 function buildLessonEvent(lesson) {
   const rule = sanitizeText(lesson?.rule, 400);
   if (!rule) return null;
-  const sourceType = sanitizeText(lesson.sourceType || inferLessonSourceType(lesson), 24) || "manual";
+  const sourceType =
+    sanitizeText(lesson.sourceType || inferLessonSourceType(lesson), 24) || "manual";
   return {
     eventId: `lesson:${getAgentId()}:${lesson.id || crypto.randomUUID()}`,
     agentId: getAgentId(),
@@ -259,7 +270,9 @@ function buildLessonEvent(lesson) {
     lesson: {
       id: lesson.id || null,
       rule,
-      tags: Array.isArray(lesson.tags) ? lesson.tags.map((tag) => sanitizeText(tag, 48)).filter(Boolean) : [],
+      tags: Array.isArray(lesson.tags)
+        ? lesson.tags.map((tag) => sanitizeText(tag, 48)).filter(Boolean)
+        : [],
       role: sanitizeText(lesson.role || "", 20) || null,
       outcome: sanitizeText(lesson.outcome || "manual", 20) || "manual",
       sourceType,
@@ -268,9 +281,15 @@ function buildLessonEvent(lesson) {
       pinned: !!lesson.pinned,
       metrics: {
         pnlPct: Number.isFinite(Number(lesson.pnl_pct)) ? Number(lesson.pnl_pct) : null,
-        feesUsd: Number.isFinite(Number(lesson.fees_earned_usd)) ? Number(lesson.fees_earned_usd) : null,
-        initialValueUsd: Number.isFinite(Number(lesson.initial_value_usd)) ? Number(lesson.initial_value_usd) : null,
-        rangeEfficiency: Number.isFinite(Number(lesson.range_efficiency)) ? Number(lesson.range_efficiency) : null,
+        feesUsd: Number.isFinite(Number(lesson.fees_earned_usd))
+          ? Number(lesson.fees_earned_usd)
+          : null,
+        initialValueUsd: Number.isFinite(Number(lesson.initial_value_usd))
+          ? Number(lesson.initial_value_usd)
+          : null,
+        rangeEfficiency: Number.isFinite(Number(lesson.range_efficiency))
+          ? Number(lesson.range_efficiency)
+          : null,
         closeReason: sanitizeText(lesson.close_reason || "", 160) || null,
       },
     },
@@ -278,9 +297,15 @@ function buildLessonEvent(lesson) {
 }
 
 function inferLessonSourceType(lesson) {
-  const tags = Array.isArray(lesson?.tags) ? lesson.tags.map((tag) => String(tag).toLowerCase()) : [];
+  const tags = Array.isArray(lesson?.tags)
+    ? lesson.tags.map((tag) => String(tag).toLowerCase())
+    : [];
   const rule = String(lesson?.rule || "").toLowerCase();
-  if (tags.includes("self_tune") || tags.includes("config_change") || rule.startsWith("[self-tuned]")) {
+  if (
+    tags.includes("self_tune") ||
+    tags.includes("config_change") ||
+    rule.startsWith("[self-tuned]")
+  ) {
     return "config_change";
   }
   if (lesson?.outcome === "manual") {
@@ -320,7 +345,9 @@ export async function pushHivePerformanceEvent(perf) {
     return await requestJson("/api/hivemind/performance/push", {
       method: "POST",
       body: {
-        eventId: sanitizeText(perf.eventId, 200) || `close:${getAgentId()}:${perf.position || perf.pool}:${perf.recorded_at || Date.now()}`,
+        eventId:
+          sanitizeText(perf.eventId, 200) ||
+          `close:${getAgentId()}:${perf.position || perf.pool}:${perf.recorded_at || Date.now()}`,
         agentId: getAgentId(),
         version: AGENT_VERSION,
         timestamp: perf.recorded_at || new Date().toISOString(),
