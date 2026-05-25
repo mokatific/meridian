@@ -4,3 +4,4 @@ pre-commit:
     - name: prettier
       glob: "*.{js,md,sh,json,yml,yaml}"
       run: yarn prettier --write {staged_files}
+      stage_fixed: true

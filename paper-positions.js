@@ -198,8 +198,7 @@ export async function openPaperPosition({
     upperPrice,
   });
 
-  const tvlShare =
-    poolTvlUsd > 0 ? initialValueUsd / (poolTvlUsd + initialValueUsd) : 1;
+  const tvlShare = poolTvlUsd > 0 ? initialValueUsd / (poolTvlUsd + initialValueUsd) : 1;
 
   const now = Date.now();
   const id = newId(pool_address);
@@ -307,8 +306,7 @@ async function tickOne(pos) {
 
   for (const c of newCandles) {
     totalSeen += 1;
-    const priceTouchedRange =
-      c.high >= pos.lower_price && c.low <= pos.upper_price;
+    const priceTouchedRange = c.high >= pos.lower_price && c.low <= pos.upper_price;
     if (priceTouchedRange) {
       inRange += 1;
       // Approximate: fee accrual proportional to fraction of candle inside range
@@ -389,7 +387,10 @@ export function closePaperPosition({ id, reason = null }) {
   pos.close_reason = reason;
   data.positions[id] = pos;
   save(data);
-  log("paper", `Closed ${id} — fees=${pos.fees_earned_usd} IL=${pos.il_pct}% reason=${reason || "n/a"}`);
+  log(
+    "paper",
+    `Closed ${id} — fees=${pos.fees_earned_usd} IL=${pos.il_pct}% reason=${reason || "n/a"}`,
+  );
   return getPaperPosition({ id });
 }
 
