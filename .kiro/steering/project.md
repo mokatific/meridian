@@ -1,4 +1,8 @@
-# Meridian — CLAUDE.md
+---
+inclusion: always
+---
+
+# Meridian — Project Context
 
 Autonomous DLMM liquidity provider agent for Meteora pools on Solana.
 
@@ -186,7 +190,7 @@ const actualBaseFee =
 ## Model Configuration
 
 - Default model: `process.env.LLM_MODEL` or `openrouter/healer-alpha`
-- Fallback on 502/503/529: `stepfun/step-3.5-flash:free` (2nd attempt), then retry
+- Fallback on 502/503/529: `gemini-2.5-pro` (2nd attempt), then retry
 - Per-role models: `managementModel`, `screeningModel`, `generalModel` in user-config.json
 - LM Studio: set `LLM_BASE_URL=http://localhost:1234/v1` and `LLM_API_KEY=lm-studio`
 - `maxOutputTokens` minimum: 2048 (free models may have lower limits causing empty responses)
@@ -239,41 +243,65 @@ Agent Meridian HiveMind sync is handled by `hivemind.js`. It uses built-in Agent
 
 `utils/lessonManager.js`:
 
-- `initializeLessonScore(lesson, outcome)` — assign initial score
-- `applyPerformanceFeedback(perf)` — update lesson score based on next position outcome
-- `pruneLessons()` — automatically remove low/old lesson scores
-- `runMaintenance()` — call periodically (every ~8 closes)
+- `initializeLessonScore(lesson, outcome)` - assign the initial score
+- `applyPerformanceFeedback(perf)` - update lesson score based on the next position outcome
+- `pruneLessons()` - automatically remove low/old lesson scores
+- `runMaintenance()` - run periodically (every ~8 closes)
 
-Integration already exists in `lessons.js` (`recordPerformance`). Lessons now have a feedback loop → they become "smarter" over time (consistent with Swarm Intelligence concept).
+Integration already exists in `lessons.js` (`recordPerformance`). Lessons now have a feedback loop - they get "smarter" over time.
 
 ---
 
 ## DRY_RUN Mode
 
-`DRY_RUN=true` in `.env` or via `yarn dev` (automatically set).
+`DRY_RUN=true` in `.env` or via `yarn dev` (set automatically).
 
-**Principle:** All on-chain operations that send real transactions are blocked — instead they return an object `{ dry_run: true, would_..., message: "DRY RUN — no transaction sent" }`.
+**Principle:** All on-chain operations that send real transactions are blocked. Instead they return `{ dry_run: true, would_..., message: "DRY RUN - no transaction sent" }`.
 
 ### Operations blocked during DRY_RUN
 
-| Location              | Function          | Skipped behavior                                              |
-| --------------------- | ----------------- | ------------------------------------------------------------- |
-| `tools/dlmm.js:573`   | `addLiquidity()`  | No TX sent, returns position details that _would_ be deployed |
-| `tools/dlmm.js:1460`  | `claimFees()`     | Does not claim fees                                           |
-| `tools/dlmm.js:1506`  | `closePosition()` | Does not close position                                       |
-| `tools/wallet.js:153` | `swapToken()`     | Does not swap tokens                                          |
+| Location          | Function          | Skipped behavior                                                      |
+| ----------------- | ----------------- | --------------------------------------------------------------------- |
+| `tools/dlmm.js`   | `addLiquidity()`  | Does not send TX, returns the position details that would be deployed |
+| `tools/dlmm.js`   | `claimFees()`     | Does not claim fees                                                   |
+| `tools/dlmm.js`   | `closePosition()` | Does not close positions                                              |
+| `tools/wallet.js` | `swapToken()`     | Does not swap tokens                                                  |
 
 ### Still running during DRY_RUN
 
-- **Screening** — pool scanning remains active (`index.js:406-407` — SOL balance check is skipped)
-- **Balance check** in executor is skipped (`executor.js:793`) — so no SOL needed
-- **Analysis & decision-making** — agent can still evaluate pools, calculate ranges, etc.
-- **HiveMind** — reports `dryRun: true` status to central (`hivemind.js:181`)
+- **Screening** - pool discovery remains active
+- **Balance check** in executor is skipped - no SOL required
+- **Analysis & decision-making** - the agent can still evaluate pools, calculate ranges, etc.
+- **HiveMind** - reports `dryRun: true` status to central
 
-### Startup log
+---
 
+## CLI Commands Reference
+
+```bash
+node cli.js positions                          # all open positions
+node cli.js pnl <position_address>             # PnL, unclaimed fees, range info
+node cli.js balance                            # wallet SOL and token balances
+node cli.js claim --position <addr>            # claim accumulated fees
+node cli.js close --position <addr>            # close position (auto-swaps to SOL)
+node cli.js pool-detail --pool <addr>          # current pool metrics
+node cli.js active-bin --pool <addr>           # current active bin and price
+node cli.js swap --from <mint> --to <mint> --amount <n>   # swap via Jupiter
+node cli.js lessons                            # show all learned lessons
+node cli.js lessons add <text>                 # record a new lesson
+node cli.js pool-memory --pool <addr>          # deploy history and win rate
+node cli.js performance                        # full closed position history
+node cli.js evolve                             # run threshold evolution
+node cli.js blacklist add --mint <addr> --reason <text>
+node cli.js blacklist list
+node cli.js candidates --limit 5              # top pool candidates
+node cli.js token-info --query <mint>
+node cli.js token-holders --mint <addr>
+node cli.js token-narrative --mint <addr>
+node cli.js study --pool <addr>               # top LPer behaviour
+node cli.js search-pools --query <name>
+node cli.js discord-signals                   # check discord signal queue
+node cli.js deploy --pool <addr> --amount <sol> --bins-below <N> --strategy bid_ask
+node cli.js withdraw-liquidity --position <addr> --pool <addr> --bps 5000
+node cli.js add-liquidity --position <addr> --pool <addr> --amount-x <n> --amount-y <n>
 ```
-index.js:45 → logs "Mode: DRY RUN" or "Mode: LIVE"
-```
-
-**Conclusion:** DRY_RUN mode is safe for testing — the agent runs fully (screening, analysis, decision) but no on-chain transactions are sent.

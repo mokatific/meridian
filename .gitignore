@@ -1,16 +1,41 @@
-# Dependencies
+# ============================================
+# Node / Yarn
+# ============================================
 node_modules/
+yarn-error.log
+**/.yarn/cache
+**/.yarn/unplugged
+**/.yarn/build-state.yml
+**/.yarn/install-state.gz
 
-# Environment & secrets
+# ============================================
+# Editor / IDE
+# ============================================
+.vscode/*
+!.vscode/mcp.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ============================================
+# OS
+# ============================================
+.DS_Store
+Thumbs.db
+
+# ============================================
+# Environment & Configuration
+# ============================================
 .env
 .env.*
 !.env.example
 .envrypt
-
-# User config (contains RPC URL, wallet key, API keys)
 user-config.json
 
-# Runtime state (position tracking, lessons — user-specific)
+# ============================================
+# Logs
+# ============================================
 state.json
 lessons.json
 smart-wallets.json
@@ -21,23 +46,59 @@ decision-log.json
 hivemind-cache.json
 signal-weights.json
 
+# ============================================
 # Logs
+# ============================================
 logs/
 
-# OS
-.DS_Store
-
+# ============================================
 # Dev context
+# ============================================
 context.md
 CONTEXT.md
 dev-blocklist.json
 docs/
 
+# ============================================
 # Discord listener queue
+# ============================================
 discord-signals.json
 
+# ============================================
 # Playwright MCP browser logs
+# ============================================
 .playwright-mcp/
 
+# ============================================
 # Claude Code runtime lock
+# ============================================
 .claude/scheduled_tasks.lock
+
+# ============================================
+# Backup files
+# ============================================
+backup/
+
+# ============================================
+# Telegram
+# ============================================
+telegram-history/*
+
+# ============================================
+# Runtime virtual positions
+# ============================================
+virtual-positions.json
+causal-analysis.json
+
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.ruff_cache

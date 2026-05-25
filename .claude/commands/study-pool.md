@@ -2,6 +2,7 @@
 description: Study top LPers on a specific pool
 argument-hint: [pool_address]
 ---
+
 Study the top LPers on this pool to understand how the best performers behave:
 
 ```
@@ -9,6 +10,7 @@ Study the top LPers on this pool to understand how the best performers behave:
 ```
 
 Analyse the results and extract:
+
 - Average hold time (scalpers vs holders)
 - Win rate of top performers
 - Dominant strategy (bid_ask vs spot)
