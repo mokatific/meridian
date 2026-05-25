@@ -45,15 +45,17 @@ function getEnvcryptKey(keyPath = DEFAULT_KEY_PATH) {
 }
 
 function shouldEncryptEnvKey(envKey) {
-  return envKey.endsWith("_KEY") ||
+  return (
+    envKey.endsWith("_KEY") ||
     envKey.startsWith("ENVRIPT_") ||
-    /(?:PRIVATE|SECRET|TOKEN|PASSPHRASE|PASSWORD|MNEMONIC)/i.test(envKey);
+    /(?:PRIVATE|SECRET|TOKEN|PASSPHRASE|PASSWORD|MNEMONIC)/i.test(envKey)
+  );
 }
 
 export function envryptEncrypt(value, key) {
   return Buffer.from(
     Array.from(String(value), (char, index) =>
-      String.fromCharCode(char.charCodeAt(0) ^ key.charCodeAt(index % key.length))
+      String.fromCharCode(char.charCodeAt(0) ^ key.charCodeAt(index % key.length)),
     ).join(""),
     "ascii",
   ).toString("base64");
@@ -62,11 +64,15 @@ export function envryptEncrypt(value, key) {
 export function envryptDecrypt(value, key) {
   const encrypted = Buffer.from(String(value), "base64").toString("utf8");
   return Array.from(encrypted, (char, index) =>
-    String.fromCharCode(char.charCodeAt(0) ^ key.charCodeAt(index % key.length))
+    String.fromCharCode(char.charCodeAt(0) ^ key.charCodeAt(index % key.length)),
   ).join("");
 }
 
-export function loadEnv({ envPath = DEFAULT_ENV_PATH, keyPath = DEFAULT_KEY_PATH, override = false } = {}) {
+export function loadEnv({
+  envPath = DEFAULT_ENV_PATH,
+  keyPath = DEFAULT_KEY_PATH,
+  override = false,
+} = {}) {
   dotenv.config({ path: envPath, override, quiet: true });
 
   const encryptedKeys = parseEncryptedKeys(envPath);
@@ -76,7 +82,7 @@ export function loadEnv({ envPath = DEFAULT_ENV_PATH, keyPath = DEFAULT_KEY_PATH
   if (!key) {
     throw new Error(
       `Encrypted env values found in ${envPath}, but no envrypt key was provided. ` +
-      "Create .envrypt or set ENVRYPT_KEY / ENVCRYPT_KEY.",
+        "Create .envrypt or set ENVRYPT_KEY / ENVCRYPT_KEY.",
     );
   }
 

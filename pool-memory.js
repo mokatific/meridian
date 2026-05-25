@@ -37,16 +37,22 @@ function save(data) {
 }
 
 function isOorCloseReason(reason) {
-  const text = String(reason || "").trim().toLowerCase();
+  const text = String(reason || "")
+    .trim()
+    .toLowerCase();
   return text === "oor" || text.includes("out of range") || text.includes("oor");
 }
 
 function isAdjustedWinRateExcludedReason(reason) {
-  const text = String(reason || "").trim().toLowerCase();
-  return text.includes("out of range") ||
+  const text = String(reason || "")
+    .trim()
+    .toLowerCase();
+  return (
+    text.includes("out of range") ||
     text.includes("pumped far above range") ||
     text === "oor" ||
-    text.includes("oor");
+    text.includes("oor")
+  );
 }
 
 function isFeeGeneratingDeploy(deploy) {
@@ -54,7 +60,8 @@ function isFeeGeneratingDeploy(deploy) {
   const feeEarnedPct = Number(deploy.fee_earned_pct ?? 0);
   const feesUsd = Number(deploy.fees_earned_usd ?? 0);
   const feesSol = Number(deploy.fees_earned_sol ?? 0);
-  const hasFees = (Number.isFinite(feesUsd) && feesUsd > 0) || (Number.isFinite(feesSol) && feesSol > 0);
+  const hasFees =
+    (Number.isFinite(feesUsd) && feesUsd > 0) || (Number.isFinite(feesSol) && feesSol > 0);
   if (!hasFees) return false;
   return Number.isFinite(feeEarnedPct) && feeEarnedPct >= minFeeEarnedPct;
 }
@@ -144,18 +151,17 @@ export function recordPoolDeploy(poolAddress, deployData) {
   // Recompute aggregates
   const withPnl = entry.deploys.filter((d) => d.pnl_pct != null);
   if (withPnl.length > 0) {
-    entry.avg_pnl_pct = Math.round(
-      (withPnl.reduce((s, d) => s + d.pnl_pct, 0) / withPnl.length) * 100
-    ) / 100;
-    entry.win_rate = Math.round(
-      (withPnl.filter((d) => d.pnl_pct >= 0).length / withPnl.length) * 100
-    ) / 100;
+    entry.avg_pnl_pct =
+      Math.round((withPnl.reduce((s, d) => s + d.pnl_pct, 0) / withPnl.length) * 100) / 100;
+    entry.win_rate =
+      Math.round((withPnl.filter((d) => d.pnl_pct >= 0).length / withPnl.length) * 100) / 100;
   }
   const adjusted = withPnl.filter((d) => !isAdjustedWinRateExcludedReason(d.close_reason));
   entry.adjusted_win_rate_sample_count = adjusted.length;
-  entry.adjusted_win_rate = adjusted.length > 0
-    ? Math.round((adjusted.filter((d) => d.pnl_pct >= 0).length / adjusted.length) * 10000) / 100
-    : 0;
+  entry.adjusted_win_rate =
+    adjusted.length > 0
+      ? Math.round((adjusted.filter((d) => d.pnl_pct >= 0).length / adjusted.length) * 10000) / 100
+      : 0;
 
   if (deployData.base_mint && !entry.base_mint) {
     entry.base_mint = deployData.base_mint;
@@ -181,12 +187,18 @@ export function recordPoolDeploy(poolAddress, deployData) {
     const mintCooldownUntil = setBaseMintCooldown(db, entry.base_mint, oorCooldownHours, reason);
     log("pool-memory", `Cooldown set for ${entry.name} until ${poolCooldownUntil} (${reason})`);
     if (entry.base_mint && mintCooldownUntil) {
-      log("pool-memory", `Base mint cooldown set for ${entry.base_mint.slice(0, 8)} until ${mintCooldownUntil} (${reason})`);
+      log(
+        "pool-memory",
+        `Base mint cooldown set for ${entry.base_mint.slice(0, 8)} until ${mintCooldownUntil} (${reason})`,
+      );
     }
   }
 
   if (config.management.repeatDeployCooldownEnabled) {
-    const triggerCount = Math.max(1, Number(config.management.repeatDeployCooldownTriggerCount ?? 3));
+    const triggerCount = Math.max(
+      1,
+      Number(config.management.repeatDeployCooldownTriggerCount ?? 3),
+    );
     const cooldownHours = Math.max(0, Number(config.management.repeatDeployCooldownHours ?? 12));
     const rawScope = String(config.management.repeatDeployCooldownScope || "token").toLowerCase();
     const scope = ["pool", "token", "both"].includes(rawScope) ? rawScope : "token";
@@ -195,24 +207,48 @@ export function recordPoolDeploy(poolAddress, deployData) {
       cooldownHours > 0 &&
       recentRepeatDeploys.length >= triggerCount &&
       recentRepeatDeploys.every((d) => d.pnl_pct != null && isFeeGeneratingDeploy(d));
+    const repeatedLosses =
+      cooldownHours > 0 &&
+      recentRepeatDeploys.length >= triggerCount &&
+      recentRepeatDeploys.every((d) => d.pnl_pct != null && d.pnl_pct < 0);
 
+    let repeatReason = null;
     if (repeatedFeeGeneratingDeploys) {
-      const reason = `repeat fee-generating deploys (${triggerCount}x)`;
+      repeatReason = `repeat fee-generating deploys (${triggerCount}x)`;
+    } else if (repeatedLosses) {
+      repeatReason = `repeat loss-making deploys (${triggerCount}x) — cooldown triggered`;
+    }
+
+    if (repeatReason) {
       if (scope === "pool" || scope === "both" || !entry.base_mint) {
-        const poolCooldownUntil = setPoolCooldown(entry, cooldownHours, reason);
-        log("pool-memory", `Cooldown set for ${entry.name} until ${poolCooldownUntil} (${reason})`);
+        const poolCooldownUntil = setPoolCooldown(entry, cooldownHours, repeatReason);
+        log(
+          "pool-memory",
+          `Cooldown set for ${entry.name} until ${poolCooldownUntil} (${repeatReason})`,
+        );
       }
       if ((scope === "token" || scope === "both") && entry.base_mint) {
-        const mintCooldownUntil = setBaseMintCooldown(db, entry.base_mint, cooldownHours, reason);
+        const mintCooldownUntil = setBaseMintCooldown(
+          db,
+          entry.base_mint,
+          cooldownHours,
+          repeatReason,
+        );
         if (mintCooldownUntil) {
-          log("pool-memory", `Base mint cooldown set for ${entry.base_mint.slice(0, 8)} until ${mintCooldownUntil} (${reason})`);
+          log(
+            "pool-memory",
+            `Base mint cooldown set for ${entry.base_mint.slice(0, 8)} until ${mintCooldownUntil} (${repeatReason})`,
+          );
         }
       }
     }
   }
 
   save(db);
-  log("pool-memory", `Recorded deploy for ${entry.name} (${poolAddress.slice(0, 8)}): PnL ${deploy.pnl_pct}%`);
+  log(
+    "pool-memory",
+    `Recorded deploy for ${entry.name} (${poolAddress.slice(0, 8)}): PnL ${deploy.pnl_pct}%`,
+  );
 }
 
 export function isPoolOnCooldown(poolAddress) {
@@ -227,10 +263,11 @@ export function isBaseMintOnCooldown(baseMint) {
   if (!baseMint) return false;
   const db = load();
   const now = new Date();
-  return Object.values(db).some((entry) =>
-    entry?.base_mint === baseMint &&
-    entry?.base_mint_cooldown_until &&
-    new Date(entry.base_mint_cooldown_until) > now
+  return Object.values(db).some(
+    (entry) =>
+      entry?.base_mint === baseMint &&
+      entry?.base_mint_cooldown_until &&
+      new Date(entry.base_mint_cooldown_until) > now,
   );
 }
 
@@ -336,15 +373,21 @@ export function recallForPool(poolAddress) {
 
   // Deploy history summary
   if (entry.total_deploys > 0) {
-    lines.push(`POOL MEMORY [${entry.name}]: ${entry.total_deploys} past deploy(s), avg PnL ${entry.avg_pnl_pct}%, win rate ${entry.win_rate}%, last outcome: ${entry.last_outcome}`);
+    lines.push(
+      `POOL MEMORY [${entry.name}]: ${entry.total_deploys} past deploy(s), avg PnL ${entry.avg_pnl_pct}%, win rate ${entry.win_rate}%, last outcome: ${entry.last_outcome}`,
+    );
   }
 
   if (entry.cooldown_until && new Date(entry.cooldown_until) > new Date()) {
-    lines.push(`POOL COOLDOWN: active until ${entry.cooldown_until}${entry.cooldown_reason ? ` (${entry.cooldown_reason})` : ""}`);
+    lines.push(
+      `POOL COOLDOWN: active until ${entry.cooldown_until}${entry.cooldown_reason ? ` (${entry.cooldown_reason})` : ""}`,
+    );
   }
 
   if (entry.base_mint_cooldown_until && new Date(entry.base_mint_cooldown_until) > new Date()) {
-    lines.push(`TOKEN COOLDOWN: active until ${entry.base_mint_cooldown_until}${entry.base_mint_cooldown_reason ? ` (${entry.base_mint_cooldown_reason})` : ""}`);
+    lines.push(
+      `TOKEN COOLDOWN: active until ${entry.base_mint_cooldown_until}${entry.base_mint_cooldown_reason ? ` (${entry.base_mint_cooldown_reason})` : ""}`,
+    );
   }
 
   // Recent snapshot trend (last 6 = ~30min)
@@ -352,11 +395,14 @@ export function recallForPool(poolAddress) {
   if (snaps.length >= 2) {
     const first = snaps[0];
     const last = snaps[snaps.length - 1];
-    const pnlTrend = last.pnl_pct != null && first.pnl_pct != null
-      ? (last.pnl_pct - first.pnl_pct).toFixed(2)
-      : null;
-    const oorCount = snaps.filter(s => s.in_range === false).length;
-    lines.push(`RECENT TREND: PnL drift ${pnlTrend !== null ? (pnlTrend >= 0 ? "+" : "") + pnlTrend + "%" : "unknown"} over last ${snaps.length} cycles, OOR in ${oorCount}/${snaps.length} cycles`);
+    const pnlTrend =
+      last.pnl_pct != null && first.pnl_pct != null
+        ? (last.pnl_pct - first.pnl_pct).toFixed(2)
+        : null;
+    const oorCount = snaps.filter((s) => s.in_range === false).length;
+    lines.push(
+      `RECENT TREND: PnL drift ${pnlTrend !== null ? (pnlTrend >= 0 ? "+" : "") + pnlTrend + "%" : "unknown"} over last ${snaps.length} cycles, OOR in ${oorCount}/${snaps.length} cycles`,
+    );
   }
 
   // Notes

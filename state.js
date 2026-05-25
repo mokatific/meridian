@@ -184,7 +184,12 @@ export function recordClose(position_address, reason) {
   pos.closed = true;
   pos.closed_at = new Date().toISOString();
   pos.notes.push(`Closed at ${pos.closed_at}: ${reason}`);
-  pushEvent(state, { action: "close", position: position_address, pool_name: pos.pool_name || pos.pool, reason });
+  pushEvent(state, {
+    action: "close",
+    position: position_address,
+    pool_name: pos.pool_name || pos.pool,
+    reason,
+  });
   save(state);
   log("state", `Position ${position_address} marked closed: ${reason}`);
 }
@@ -217,27 +222,32 @@ export function queuePeakConfirmation(position_address, candidatePnlPct, options
     pos.pending_peak_pnl_pct = null;
     pos.pending_peak_started_at = null;
     save(state);
-    log("state", `Position ${position_address} peak PnL accepted at ${candidatePnlPct.toFixed(2)}% from relay poll`);
+    log(
+      "state",
+      `Position ${position_address} peak PnL accepted at ${candidatePnlPct.toFixed(2)}% from relay poll`,
+    );
     return true;
   }
 
-  const changed =
-    pos.pending_peak_pnl_pct == null ||
-    candidatePnlPct > pos.pending_peak_pnl_pct;
+  const changed = pos.pending_peak_pnl_pct == null || candidatePnlPct > pos.pending_peak_pnl_pct;
 
   if (!changed) return false;
 
   pos.pending_peak_pnl_pct = candidatePnlPct;
   pos.pending_peak_started_at = new Date().toISOString();
   save(state);
-  log("state", `Position ${position_address} peak candidate ${candidatePnlPct.toFixed(2)}% queued for 15s confirmation`);
+  log(
+    "state",
+    `Position ${position_address} peak candidate ${candidatePnlPct.toFixed(2)}% queued for 15s confirmation`,
+  );
   return true;
 }
 
 export function resolvePendingPeak(position_address, currentPnlPct, toleranceRatio = 0.85) {
   const state = load();
   const pos = state.positions[position_address];
-  if (!pos || pos.closed || pos.pending_peak_pnl_pct == null) return { confirmed: false, pending: false };
+  if (!pos || pos.closed || pos.pending_peak_pnl_pct == null)
+    return { confirmed: false, pending: false };
 
   const pendingPeak = pos.pending_peak_pnl_pct;
   pos.pending_peak_pnl_pct = null;
@@ -246,16 +256,27 @@ export function resolvePendingPeak(position_address, currentPnlPct, toleranceRat
   if (currentPnlPct != null && currentPnlPct >= pendingPeak * toleranceRatio) {
     pos.peak_pnl_pct = Math.max(pos.peak_pnl_pct ?? 0, pendingPeak, currentPnlPct);
     save(state);
-    log("state", `Position ${position_address} peak PnL confirmed at ${pos.peak_pnl_pct.toFixed(2)}% after recheck`);
+    log(
+      "state",
+      `Position ${position_address} peak PnL confirmed at ${pos.peak_pnl_pct.toFixed(2)}% after recheck`,
+    );
     return { confirmed: true, peak: pos.peak_pnl_pct };
   }
 
   save(state);
-  log("state", `Position ${position_address} rejected pending peak ${pendingPeak.toFixed(2)}% after 15s recheck (current: ${currentPnlPct ?? "?"}%)`);
+  log(
+    "state",
+    `Position ${position_address} rejected pending peak ${pendingPeak.toFixed(2)}% after 15s recheck (current: ${currentPnlPct ?? "?"}%)`,
+  );
   return { confirmed: false, rejected: true, pendingPeak };
 }
 
-export function queueTrailingDropConfirmation(position_address, peakPnlPct, currentPnlPct, trailingDropPct) {
+export function queueTrailingDropConfirmation(
+  position_address,
+  peakPnlPct,
+  currentPnlPct,
+  trailingDropPct,
+) {
   if (peakPnlPct == null || currentPnlPct == null || trailingDropPct == null) return false;
   const dropFromPeak = peakPnlPct - currentPnlPct;
   if (dropFromPeak < trailingDropPct) return false;
@@ -276,20 +297,33 @@ export function queueTrailingDropConfirmation(position_address, peakPnlPct, curr
   pos.pending_trailing_drop_pct = dropFromPeak;
   pos.pending_trailing_started_at = new Date().toISOString();
   save(state);
-  log("state", `Position ${position_address} trailing drop candidate queued: peak ${peakPnlPct.toFixed(2)}% -> current ${currentPnlPct.toFixed(2)}%`);
+  log(
+    "state",
+    `Position ${position_address} trailing drop candidate queued: peak ${peakPnlPct.toFixed(2)}% -> current ${currentPnlPct.toFixed(2)}%`,
+  );
   return true;
 }
 
-export function resolvePendingTrailingDrop(position_address, currentPnlPct, trailingDropPct, tolerancePct = 1.0) {
+export function resolvePendingTrailingDrop(
+  position_address,
+  currentPnlPct,
+  trailingDropPct,
+  tolerancePct = 1.0,
+) {
   const state = load();
   const pos = state.positions[position_address];
-  if (!pos || pos.closed || pos.pending_trailing_current_pnl_pct == null || pos.pending_trailing_peak_pnl_pct == null) {
+  if (
+    !pos ||
+    pos.closed ||
+    pos.pending_trailing_current_pnl_pct == null ||
+    pos.pending_trailing_peak_pnl_pct == null
+  ) {
     return { confirmed: false, pending: false };
   }
 
   const pendingCurrent = pos.pending_trailing_current_pnl_pct;
   const pendingPeak = pos.pending_trailing_peak_pnl_pct;
-  const pendingDrop = pos.pending_trailing_drop_pct ?? (pendingPeak - pendingCurrent);
+  const pendingDrop = pos.pending_trailing_drop_pct ?? pendingPeak - pendingCurrent;
 
   pos.pending_trailing_current_pnl_pct = null;
   pos.pending_trailing_peak_pnl_pct = null;
@@ -297,29 +331,27 @@ export function resolvePendingTrailingDrop(position_address, currentPnlPct, trai
   pos.pending_trailing_started_at = null;
 
   const stillNearCrash = currentPnlPct != null && currentPnlPct <= pendingCurrent + tolerancePct;
-  const stillDroppedEnough = currentPnlPct != null && (pendingPeak - currentPnlPct) >= trailingDropPct;
+  const stillDroppedEnough =
+    currentPnlPct != null && pendingPeak - currentPnlPct >= trailingDropPct;
 
   if (stillNearCrash && stillDroppedEnough) {
     const reason = `Trailing TP: peak ${pendingPeak.toFixed(2)}% → current ${currentPnlPct.toFixed(2)}% (dropped ${(pendingPeak - currentPnlPct).toFixed(2)}% >= ${trailingDropPct}%)`;
     pos.confirmed_trailing_exit_reason = reason;
     pos.confirmed_trailing_exit_until = new Date(Date.now() + 30_000).toISOString();
     save(state);
-    log("state", `Position ${position_address} trailing drop confirmed after recheck: pending drop ${pendingDrop.toFixed(2)}%, current ${currentPnlPct.toFixed(2)}%`);
+    log(
+      "state",
+      `Position ${position_address} trailing drop confirmed after recheck: pending drop ${pendingDrop.toFixed(2)}%, current ${currentPnlPct.toFixed(2)}%`,
+    );
     return { confirmed: true, reason };
   }
 
   save(state);
-  log("state", `Position ${position_address} rejected trailing drop after 15s recheck (pending current: ${pendingCurrent.toFixed(2)}%, current: ${currentPnlPct ?? "?"}%)`);
+  log(
+    "state",
+    `Position ${position_address} rejected trailing drop after 15s recheck (pending current: ${pendingCurrent.toFixed(2)}%, current: ${currentPnlPct ?? "?"}%)`,
+  );
   return { confirmed: false, rejected: true };
-}
-
-/**
- * Get all tracked positions (optionally filter open-only).
- */
-export function getTrackedPositions(openOnly = false) {
-  const state = load();
-  const all = Object.values(state.positions);
-  return openOnly ? all.filter((p) => !p.closed) : all;
 }
 
 /**
@@ -331,14 +363,29 @@ export function getTrackedPosition(position_address) {
 }
 
 /**
+ * Get all tracked positions.
+ * @param {boolean} openOnly - If true, only return non-closed positions
+ */
+export function getTrackedPositions(openOnly = false) {
+  const state = load();
+  const positions = Object.values(state.positions);
+  if (openOnly) {
+    return positions.filter((p) => !p.closed);
+  }
+  return positions;
+}
+
+/**
  * Summarize state for the agent system prompt.
  */
 export function getStateSummary() {
   const state = load();
   const open = Object.values(state.positions).filter((p) => !p.closed);
   const closed = Object.values(state.positions).filter((p) => p.closed);
-  const totalFeesClaimed = Object.values(state.positions)
-    .reduce((sum, p) => sum + (p.total_fees_claimed_usd || 0), 0);
+  const totalFeesClaimed = Object.values(state.positions).reduce(
+    (sum, p) => sum + (p.total_fees_claimed_usd || 0),
+    0,
+  );
 
   return {
     open_positions: open.length,
@@ -376,7 +423,10 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   if (!pos || pos.closed) return null;
 
   if (pos.confirmed_trailing_exit_until) {
-    if (new Date(pos.confirmed_trailing_exit_until).getTime() > Date.now() && pos.confirmed_trailing_exit_reason) {
+    if (
+      new Date(pos.confirmed_trailing_exit_until).getTime() > Date.now() &&
+      pos.confirmed_trailing_exit_reason
+    ) {
       const reason = pos.confirmed_trailing_exit_reason;
       pos.confirmed_trailing_exit_reason = null;
       pos.confirmed_trailing_exit_until = null;
@@ -390,10 +440,17 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   let changed = false;
 
   // Activate trailing TP once trigger threshold is reached
-  if (mgmtConfig.trailingTakeProfit && !pos.trailing_active && (pos.peak_pnl_pct ?? 0) >= mgmtConfig.trailingTriggerPct) {
+  if (
+    mgmtConfig.trailingTakeProfit &&
+    !pos.trailing_active &&
+    (pos.peak_pnl_pct ?? 0) >= mgmtConfig.trailingTriggerPct
+  ) {
     pos.trailing_active = true;
     changed = true;
-    log("state", `Position ${position_address} trailing TP activated (confirmed peak: ${pos.peak_pnl_pct}%)`);
+    log(
+      "state",
+      `Position ${position_address} trailing TP activated (confirmed peak: ${pos.peak_pnl_pct}%)`,
+    );
   }
 
   // Update OOR state
@@ -410,7 +467,12 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   if (changed) save(state);
 
   // ── Stop loss ──────────────────────────────────────────────────
-  if (!pnl_pct_suspicious && currentPnlPct != null && mgmtConfig.stopLossPct != null && currentPnlPct <= mgmtConfig.stopLossPct) {
+  if (
+    !pnl_pct_suspicious &&
+    currentPnlPct != null &&
+    mgmtConfig.stopLossPct != null &&
+    currentPnlPct <= mgmtConfig.stopLossPct
+  ) {
     return {
       action: "STOP_LOSS",
       reason: `Stop loss: PnL ${currentPnlPct.toFixed(2)}% <= ${mgmtConfig.stopLossPct}%`,
@@ -434,7 +496,9 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
 
   // ── Out of range too long ──────────────────────────────────────
   if (pos.out_of_range_since) {
-    const minutesOOR = Math.floor((Date.now() - new Date(pos.out_of_range_since).getTime()) / 60000);
+    const minutesOOR = Math.floor(
+      (Date.now() - new Date(pos.out_of_range_since).getTime()) / 60000,
+    );
     if (minutesOOR >= mgmtConfig.outOfRangeWaitMinutes) {
       return {
         action: "OUT_OF_RANGE",
@@ -495,6 +559,9 @@ export function syncOpenPositions(active_addresses) {
     const pos = state.positions[posId];
     if (pos.closed || activeSet.has(posId)) continue;
 
+    // Virtual positions (dry run simulator) are never on-chain — skip sync
+    if (pos.virtual) continue;
+
     // Grace period: newly deployed positions may not be indexed yet
     const deployedAt = pos.deployed_at ? new Date(pos.deployed_at).getTime() : 0;
     if (Date.now() - deployedAt < SYNC_GRACE_MS) {
@@ -504,6 +571,7 @@ export function syncOpenPositions(active_addresses) {
 
     pos.closed = true;
     pos.closed_at = new Date().toISOString();
+    if (!Array.isArray(pos.notes)) pos.notes = [];
     pos.notes.push(`Auto-closed during state sync (not found on-chain)`);
     changed = true;
     log("state", `Position ${posId} auto-closed (missing from on-chain data)`);

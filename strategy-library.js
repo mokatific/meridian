@@ -32,9 +32,22 @@ const DEFAULT_STRATEGIES = {
     author: "meridian",
     lp_strategy: "spot",
     token_criteria: { notes: "Any token. Ratio expresses directional bias." },
-    entry: { condition: "Directional view on token", single_side: null, notes: "75% token = bullish (sell on pump out of range). 75% SOL = bearish/DCA-in (buy on dip). Set bins_below:bins_above proportional to ratio." },
-    range: { type: "custom", notes: "bins_below:bins_above ratio matches token:SOL ratio. E.g., 75% token → ~52 bins below, ~17 bins above." },
-    exit: { take_profit_pct: 10, notes: "Close when OOR or TP hit. Re-deploy with updated ratio based on new momentum signals." },
+    entry: {
+      condition: "Directional view on token",
+      single_side: null,
+      notes:
+        "75% token = bullish (sell on pump out of range). 75% SOL = bearish/DCA-in (buy on dip). Set bins_below:bins_above proportional to ratio.",
+    },
+    range: {
+      type: "custom",
+      notes:
+        "bins_below:bins_above ratio matches token:SOL ratio. E.g., 75% token → ~52 bins below, ~17 bins above.",
+    },
+    exit: {
+      take_profit_pct: 10,
+      notes:
+        "Close when OOR or TP hit. Re-deploy with updated ratio based on new momentum signals.",
+    },
     best_for: "Expressing directional bias while earning fees both ways",
   },
   single_sided_reseed: {
@@ -43,9 +56,22 @@ const DEFAULT_STRATEGIES = {
     author: "meridian",
     lp_strategy: "bid_ask",
     token_criteria: { notes: "Volatile tokens with strong narrative. Must have active volume." },
-    entry: { condition: "Deploy token-only (amount_x only, amount_y=0) bid-ask, bins below active bin only", single_side: "token", notes: "As price drops through bins, token sold for SOL. Bid-ask concentrates at bottom edge." },
-    range: { type: "default", bins_below_pct: 100, notes: "All bins below active bin. bins_above=0." },
-    exit: { notes: "When OOR downside: close_position(skip_swap=true) → redeploy token-only bid-ask at new lower price. Do NOT swap to SOL. Full close only when token dead or after N re-seeds with declining performance." },
+    entry: {
+      condition:
+        "Deploy token-only (amount_x only, amount_y=0) bid-ask, bins below active bin only",
+      single_side: "token",
+      notes:
+        "As price drops through bins, token sold for SOL. Bid-ask concentrates at bottom edge.",
+    },
+    range: {
+      type: "default",
+      bins_below_pct: 100,
+      notes: "All bins below active bin. bins_above=0.",
+    },
+    exit: {
+      notes:
+        "When OOR downside: close_position(skip_swap=true) → redeploy token-only bid-ask at new lower price. Do NOT swap to SOL. Full close only when token dead or after N re-seeds with declining performance.",
+    },
     best_for: "Riding volatile tokens down without cutting losses. DCA out via LP.",
   },
   fee_compounding: {
@@ -54,9 +80,15 @@ const DEFAULT_STRATEGIES = {
     author: "meridian",
     lp_strategy: "any",
     token_criteria: { notes: "Stable volume pools with consistent fee generation." },
-    entry: { condition: "Deploy normally with any shape", notes: "Strategy is about management, not entry shape." },
+    entry: {
+      condition: "Deploy normally with any shape",
+      notes: "Strategy is about management, not entry shape.",
+    },
     range: { type: "default", notes: "Standard range for the pair." },
-    exit: { notes: "When unclaimed fees > $5 AND in range: claim_fees → add_liquidity back into same position. Normal close rules otherwise." },
+    exit: {
+      notes:
+        "When unclaimed fees > $5 AND in range: claim_fees → add_liquidity back into same position. Normal close rules otherwise.",
+    },
     best_for: "Maximizing yield on stable, range-bound pools via compounding",
   },
   multi_layer: {
@@ -64,19 +96,35 @@ const DEFAULT_STRATEGIES = {
     name: "Multi-Layer",
     author: "meridian",
     lp_strategy: "mixed",
-    token_criteria: { notes: "High volume pools. Layer multiple shapes into ONE position via addLiquidityByStrategy to sculpt a composite distribution." },
+    token_criteria: {
+      notes:
+        "High volume pools. Layer multiple shapes into ONE position via addLiquidityByStrategy to sculpt a composite distribution.",
+    },
     entry: {
-      condition: "Create ONE position, then layer additional shapes onto it with add-liquidity. Each layer adds a different strategy/shape to the same position, compositing them.",
-      notes: "Step 1: deploy (creates position with first shape). Step 2+: add-liquidity to same position with different shapes. All layers share the same bin range but different distribution curves stack on top of each other.",
+      condition:
+        "Create ONE position, then layer additional shapes onto it with add-liquidity. Each layer adds a different strategy/shape to the same position, compositing them.",
+      notes:
+        "Step 1: deploy (creates position with first shape). Step 2+: add-liquidity to same position with different shapes. All layers share the same bin range but different distribution curves stack on top of each other.",
       example_patterns: {
-        smooth_edge: "Deploy Bid-Ask (edges) → add-liquidity Spot (fills the middle gap). 2 layers, 1 position.",
-        full_composite: "Deploy Bid-Ask (edges) → add-liquidity Spot (middle) → add-liquidity Curve (center boost). 3 layers, 1 position.",
-        edge_heavy: "Deploy Bid-Ask → add-liquidity Bid-Ask again (double edge weight). 2 layers, 1 position.",
+        smooth_edge:
+          "Deploy Bid-Ask (edges) → add-liquidity Spot (fills the middle gap). 2 layers, 1 position.",
+        full_composite:
+          "Deploy Bid-Ask (edges) → add-liquidity Spot (middle) → add-liquidity Curve (center boost). 3 layers, 1 position.",
+        edge_heavy:
+          "Deploy Bid-Ask → add-liquidity Bid-Ask again (double edge weight). 2 layers, 1 position.",
       },
     },
-    range: { type: "custom", notes: "All layers share the position's bin range (set at deploy). Choose range wide enough for the widest layer needed." },
-    exit: { notes: "Single position — one close, one claim. The composite shape means fees earned reflect ALL layers combined." },
-    best_for: "Creating custom liquidity distributions by stacking shapes in one position. Single position to manage.",
+    range: {
+      type: "custom",
+      notes:
+        "All layers share the position's bin range (set at deploy). Choose range wide enough for the widest layer needed.",
+    },
+    exit: {
+      notes:
+        "Single position — one close, one claim. The composite shape means fees earned reflect ALL layers combined.",
+    },
+    best_for:
+      "Creating custom liquidity distributions by stacking shapes in one position. Single position to manage.",
   },
   partial_harvest: {
     id: "partial_harvest",
@@ -84,9 +132,16 @@ const DEFAULT_STRATEGIES = {
     author: "meridian",
     lp_strategy: "any",
     token_criteria: { notes: "High fee pools where taking profit incrementally is preferred." },
-    entry: { condition: "Deploy normally", notes: "Strategy is about progressive profit-taking, not entry." },
+    entry: {
+      condition: "Deploy normally",
+      notes: "Strategy is about progressive profit-taking, not entry.",
+    },
     range: { type: "default", notes: "Standard range." },
-    exit: { take_profit_pct: 10, notes: "When total return >= 10% of deployed capital: withdraw_liquidity(bps=5000) to take 50% off. Remaining 50% keeps running. Repeat at next threshold." },
+    exit: {
+      take_profit_pct: 10,
+      notes:
+        "When total return >= 10% of deployed capital: withdraw_liquidity(bps=5000) to take 50% off. Remaining 50% keeps running. Repeat at next threshold.",
+    },
     best_for: "Locking in profits without fully exiting winning positions",
   },
 };
@@ -123,20 +178,23 @@ export function addStrategy({
   id,
   name,
   author = "unknown",
-  lp_strategy = "bid_ask",       // "bid_ask" | "spot" | "curve"
-  token_criteria = {},           // { min_mcap, min_age_days, requires_kol, notes }
-  entry = {},                    // { condition, price_change_threshold_pct, single_side }
-  range = {},                    // { type, bins_below_pct, notes }
-  exit = {},                     // { take_profit_pct, notes }
-  best_for = "",                 // short description of ideal conditions
-  raw = "",                      // original tweet/text
+  lp_strategy = "bid_ask", // "bid_ask" | "spot" | "curve"
+  token_criteria = {}, // { min_mcap, min_age_days, requires_kol, notes }
+  entry = {}, // { condition, price_change_threshold_pct, single_side }
+  range = {}, // { type, bins_below_pct, notes }
+  exit = {}, // { take_profit_pct, notes }
+  best_for = "", // short description of ideal conditions
+  raw = "", // original tweet/text
 }) {
   if (!id || !name) return { error: "id and name are required" };
 
   const db = load();
 
   // Slugify id
-  const slug = id.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+  const slug = id
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
 
   db.strategies[slug] = {
     id: slug,
@@ -185,7 +243,8 @@ export function getStrategy({ id }) {
   if (!id) return { error: "id required" };
   const db = load();
   const strategy = db.strategies[id];
-  if (!strategy) return { error: `Strategy "${id}" not found`, available: Object.keys(db.strategies) };
+  if (!strategy)
+    return { error: `Strategy "${id}" not found`, available: Object.keys(db.strategies) };
   return { ...strategy, is_active: db.active === id };
 }
 
@@ -195,7 +254,8 @@ export function getStrategy({ id }) {
 export function setActiveStrategy({ id }) {
   if (!id) return { error: "id required" };
   const db = load();
-  if (!db.strategies[id]) return { error: `Strategy "${id}" not found`, available: Object.keys(db.strategies) };
+  if (!db.strategies[id])
+    return { error: `Strategy "${id}" not found`, available: Object.keys(db.strategies) };
   db.active = id;
   save(db);
   log("strategy", `Active strategy set to: ${db.strategies[id].name}`);

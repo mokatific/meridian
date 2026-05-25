@@ -37,9 +37,19 @@ export function appendDecision(entry) {
     position: entry.position || null,
     summary: sanitize(entry.summary),
     reason: sanitize(entry.reason, 500),
-    risks: Array.isArray(entry.risks) ? entry.risks.map((r) => sanitize(r, 140)).filter(Boolean).slice(0, 6) : [],
+    risks: Array.isArray(entry.risks)
+      ? entry.risks
+          .map((r) => sanitize(r, 140))
+          .filter(Boolean)
+          .slice(0, 6)
+      : [],
     metrics: entry.metrics || {},
-    rejected: Array.isArray(entry.rejected) ? entry.rejected.map((r) => sanitize(r, 180)).filter(Boolean).slice(0, 8) : [],
+    rejected: Array.isArray(entry.rejected)
+      ? entry.rejected
+          .map((r) => sanitize(r, 180))
+          .filter(Boolean)
+          .slice(0, 8)
+      : [],
   };
   data.decisions.unshift(decision);
   data.decisions = data.decisions.slice(0, MAX_DECISIONS);
@@ -55,14 +65,16 @@ export function getRecentDecisions(limit = 10) {
 export function getDecisionSummary(limit = 6) {
   const decisions = getRecentDecisions(limit);
   if (!decisions.length) return "No recent structured decisions yet.";
-  return decisions.map((d, i) => {
-    const bits = [
-      `${i + 1}. [${d.actor}] ${d.type.toUpperCase()} ${d.pool_name || d.pool || "unknown pool"}`,
-      d.summary ? `summary: ${d.summary}` : null,
-      d.reason ? `reason: ${d.reason}` : null,
-      d.risks?.length ? `risks: ${d.risks.join(", ")}` : null,
-      d.rejected?.length ? `rejected: ${d.rejected.join(" | ")}` : null,
-    ].filter(Boolean);
-    return bits.join(" | ");
-  }).join("\n");
+  return decisions
+    .map((d, i) => {
+      const bits = [
+        `${i + 1}. [${d.actor}] ${d.type.toUpperCase()} ${d.pool_name || d.pool || "unknown pool"}`,
+        d.summary ? `summary: ${d.summary}` : null,
+        d.reason ? `reason: ${d.reason}` : null,
+        d.risks?.length ? `risks: ${d.risks.join(", ")}` : null,
+        d.rejected?.length ? `rejected: ${d.rejected.join(" | ")}` : null,
+      ].filter(Boolean);
+      return bits.join(" | ");
+    })
+    .join("\n");
 }

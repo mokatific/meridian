@@ -37,7 +37,8 @@ export function getBlockedDevs() {
 export function blockDev({ wallet, reason, label }) {
   if (!wallet) return { error: "wallet required" };
   const db = load();
-  if (db[wallet]) return { already_blocked: true, wallet, label: db[wallet].label, reason: db[wallet].reason };
+  if (db[wallet])
+    return { already_blocked: true, wallet, label: db[wallet].label, reason: db[wallet].reason };
   db[wallet] = {
     label: label || "unknown",
     reason: reason || "no reason provided",

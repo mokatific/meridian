@@ -11,25 +11,19 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { log } from "./logger.js";
 import { getSharedLessonsForPrompt, pushHiveLesson, pushHivePerformanceEvent } from "./hivemind.js";
+import {
+  initializeLessonScore,
+  applyPerformanceFeedback,
+  pruneLessons,
+  runMaintenance,
+} from "./utils/lessonManager.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
 
 const LESSONS_FILE = "./lessons.json";
-const MIN_EVOLVE_POSITIONS = 5;   // don't evolve until we have real data
-const MAX_CHANGE_PER_STEP  = 0.20; // never shift a threshold more than 20% at once
-const PERFORMANCE_SIGNAL_FIELDS = [
-  "organic_score",
-  "fee_tvl_ratio",
-  "volume",
-  "mcap",
-  "holder_count",
-  "smart_wallets_present",
-  "narrative_quality",
-  "study_win_rate",
-  "hive_consensus",
-  "volatility",
-];
+const MIN_EVOLVE_POSITIONS = 5; // don't evolve until we have real data
+const MAX_CHANGE_PER_STEP = 0.2; // never shift a threshold more than 20% at once
 const MAX_MANUAL_LESSON_LENGTH = 400;
 
 function sanitizeLessonText(text, maxLen = MAX_MANUAL_LESSON_LENGTH) {
@@ -56,17 +50,6 @@ function load() {
 
 function save(data) {
   fs.writeFileSync(LESSONS_FILE, JSON.stringify(data, null, 2));
-}
-
-function buildSignalSnapshot(perf) {
-  const snapshot = { ...(perf.signal_snapshot || {}) };
-  if (perf.base_mint && snapshot.base_mint == null) snapshot.base_mint = perf.base_mint;
-  for (const field of PERFORMANCE_SIGNAL_FIELDS) {
-    if (snapshot[field] == null && perf[field] != null) {
-      snapshot[field] = perf[field];
-    }
-  }
-  return Object.values(snapshot).some((value) => value != null) ? snapshot : null;
 }
 
 // ─── Record Position Performance ──────────────────────────────
@@ -108,17 +91,18 @@ export async function recordPerformance(perf) {
     perf.final_value_usd <= perf.amount_sol * 2;
 
   if (suspiciousUnitMix) {
-    log("lessons_warn", `Skipped suspicious performance record for ${perf.pool_name || perf.pool}: initial=${perf.initial_value_usd}, final=${perf.final_value_usd}, amount_sol=${perf.amount_sol}`);
+    log(
+      "lessons_warn",
+      `Skipped suspicious performance record for ${perf.pool_name || perf.pool}: initial=${perf.initial_value_usd}, final=${perf.final_value_usd}, amount_sol=${perf.amount_sol}`,
+    );
     return;
   }
 
-  const pnl_usd = (perf.final_value_usd + perf.fees_earned_usd) - perf.initial_value_usd;
-  const pnl_pct = perf.initial_value_usd > 0
-    ? (pnl_usd / perf.initial_value_usd) * 100
-    : 0;
-  const range_efficiency = perf.minutes_held > 0
-    ? (perf.minutes_in_range / perf.minutes_held) * 100
-    : 0;
+  // final_value_usd already includes fees (from dry-run-simulator: initial + pnl_usd where pnl includes fees)
+  const pnl_usd = perf.final_value_usd - perf.initial_value_usd;
+  const pnl_pct = perf.initial_value_usd > 0 ? (pnl_usd / perf.initial_value_usd) * 100 : 0;
+  const range_efficiency =
+    perf.minutes_held > 0 ? (perf.minutes_in_range / perf.minutes_held) * 100 : 0;
 
   const closeReasonText = String(perf.close_reason || "").toLowerCase();
   const suspiciousAbsurdClosedPnl =
@@ -128,14 +112,15 @@ export async function recordPerformance(perf) {
     !closeReasonText.includes("stop loss");
 
   if (suspiciousAbsurdClosedPnl) {
-    log("lessons_warn", `Skipped absurd closed PnL record for ${perf.pool_name || perf.pool}: pnl_pct=${pnl_pct.toFixed(2)} reason=${perf.close_reason}`);
+    log(
+      "lessons_warn",
+      `Skipped absurd closed PnL record for ${perf.pool_name || perf.pool}: pnl_pct=${pnl_pct.toFixed(2)} reason=${perf.close_reason}`,
+    );
     return;
   }
 
-  const signalSnapshot = buildSignalSnapshot(perf);
   const entry = {
     ...perf,
-    signal_snapshot: signalSnapshot,
     pnl_usd: Math.round(pnl_usd * 100) / 100,
     pnl_pct: Math.round(pnl_pct * 100) / 100,
     range_efficiency: Math.round(range_efficiency * 10) / 10,
@@ -144,9 +129,10 @@ export async function recordPerformance(perf) {
 
   data.performance.push(entry);
 
-  // Derive and store a lesson
-  const lesson = derivLesson(entry);
+  // Derive and store a lesson (now with scoring)
+  let lesson = derivLesson(entry);
   if (lesson) {
+    lesson = initializeLessonScore(lesson, lesson.outcome);
     data.lessons.push(lesson);
     log("lessons", `New lesson: ${lesson.rule}`);
   }
@@ -154,6 +140,16 @@ export async function recordPerformance(perf) {
   save(data);
   if (lesson) {
     void pushHiveLesson(lesson);
+  }
+
+  // Apply scoring feedback to relevant existing lessons
+  if (data.lessons.length > 0) {
+    applyPerformanceFeedback(entry, data.lessons.slice(-20));
+  }
+
+  // Auto-prune every 8 closes
+  if (data.performance.length % 8 === 0) {
+    runMaintenance();
   }
 
   // Update pool-level memory
@@ -170,7 +166,10 @@ export async function recordPerformance(perf) {
       minutes_held: perf.minutes_held,
       fees_earned_usd: perf.fees_earned_usd,
       fees_earned_sol: perf.fees_earned_sol,
-      fee_earned_pct: perf.initial_value_usd > 0 ? ((perf.fees_earned_usd || 0) / perf.initial_value_usd) * 100 : null,
+      fee_earned_pct:
+        perf.initial_value_usd > 0
+          ? ((perf.fees_earned_usd || 0) / perf.initial_value_usd) * 100
+          : null,
       close_reason: perf.close_reason,
       strategy: perf.strategy,
       volatility: perf.volatility,
@@ -194,6 +193,16 @@ export async function recordPerformance(perf) {
         log("evolve", `Darwin: adjusted ${wResult.changes.length} signal weight(s)`);
       }
     }
+
+    // Causal analysis — find WHY positions win or lose
+    const { runCausalAnalysis } = await import("./causal-analysis.js");
+    const causalResult = runCausalAnalysis(data.performance);
+    if (causalResult.lessons_added > 0) {
+      log(
+        "causal",
+        `Added ${causalResult.lessons_added} causal lesson(s) from ${data.performance.length} closes`,
+      );
+    }
   }
 
   void pushHivePerformanceEvent({
@@ -202,7 +211,6 @@ export async function recordPerformance(perf) {
     fees_earned_sol: perf.fees_earned_sol || 0,
     eventId: `close:${perf.position}:${entry.recorded_at}`,
   });
-
 }
 
 /**
@@ -211,16 +219,20 @@ export async function recordPerformance(perf) {
  */
 function derivLesson(perf) {
   const tags = [];
-  const feeYieldPct = perf.initial_value_usd > 0
-    ? ((perf.fees_earned_usd || 0) / perf.initial_value_usd) * 100
-    : 0;
+  const feeYieldPct =
+    perf.initial_value_usd > 0 ? ((perf.fees_earned_usd || 0) / perf.initial_value_usd) * 100 : 0;
 
   // Categorize outcome
-  const outcome = perf.pnl_pct >= 5 ? "good"
-    : (perf.pnl_pct >= 0 && feeYieldPct >= 2) ? "good"
-    : perf.pnl_pct >= 0 ? "neutral"
-    : perf.pnl_pct >= -5 ? "poor"
-    : "bad";
+  const outcome =
+    perf.pnl_pct >= 5
+      ? "good"
+      : perf.pnl_pct >= 0 && feeYieldPct >= 2
+        ? "good"
+        : perf.pnl_pct >= 0
+          ? "neutral"
+          : perf.pnl_pct >= -5
+            ? "poor"
+            : "bad";
 
   if (outcome === "neutral") return null; // nothing interesting to learn
 
@@ -232,7 +244,7 @@ function derivLesson(perf) {
     `volatility=${perf.volatility}`,
     `fee_tvl_ratio=${perf.fee_tvl_ratio}`,
     `organic=${perf.organic_score}`,
-    `bin_range=${typeof perf.bin_range === 'object' ? JSON.stringify(perf.bin_range) : perf.bin_range}`,
+    `bin_range=${typeof perf.bin_range === "object" ? JSON.stringify(perf.bin_range) : perf.bin_range}`,
   ].join(", ");
 
   let rule = "";
@@ -260,9 +272,7 @@ function derivLesson(perf) {
 
   const closeReasonText = String(perf.close_reason || "").toLowerCase();
   const positiveEvidence =
-    feeYieldPct >= 1 ||
-    (perf.fees_earned_usd || 0) >= 3 ||
-    perf.pnl_pct >= 3;
+    feeYieldPct >= 1 || (perf.fees_earned_usd || 0) >= 3 || perf.pnl_pct >= 3;
   const negativeEvidence =
     perf.pnl_pct <= -5 ||
     perf.range_efficiency <= 30 ||
@@ -312,13 +322,13 @@ export function evolveThresholds(perfData, config) {
   if (!perfData || perfData.length < MIN_EVOLVE_POSITIONS) return null;
 
   const winners = perfData.filter((p) => p.pnl_pct > 0);
-  const losers  = perfData.filter((p) => p.pnl_pct < -5);
+  const losers = perfData.filter((p) => p.pnl_pct < -5);
 
   // Need at least some signal in both directions before adjusting
   const hasSignal = winners.length >= 2 || losers.length >= 2;
   if (!hasSignal) return null;
 
-  const changes   = {};
+  const changes = {};
   const rationale = {};
 
   // ── 1. maxVolatility ─────────────────────────────────────────
@@ -326,16 +336,16 @@ export function evolveThresholds(perfData, config) {
   // If winners span higher volatility safely → we can loosen a bit.
   {
     const winnerVols = winners.map((p) => p.volatility).filter(isFiniteNum);
-    const loserVols  = losers.map((p) => p.volatility).filter(isFiniteNum);
-    const current    = config.screening.maxVolatility;
+    const loserVols = losers.map((p) => p.volatility).filter(isFiniteNum);
+    const current = config.screening.maxVolatility;
 
     if (loserVols.length >= 2) {
       // 25th percentile of loser volatilities — this is where things start going wrong
       const loserP25 = percentile(loserVols, 25);
       if (loserP25 < current) {
         // Tighten: new ceiling = loserP25 + a small buffer
-        const target  = loserP25 * 1.15;
-        const newVal  = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 1.0, 20.0);
+        const target = loserP25 * 1.15;
+        const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 1.0, 20.0);
         const rounded = Number(newVal.toFixed(1));
         if (rounded < current) {
           changes.maxVolatility = rounded;
@@ -346,8 +356,8 @@ export function evolveThresholds(perfData, config) {
       // All winners so far — loosen conservatively so we don't miss good pools
       const winnerP75 = percentile(winnerVols, 75);
       if (winnerP75 > current * 1.1) {
-        const target  = winnerP75 * 1.1;
-        const newVal  = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 1.0, 20.0);
+        const target = winnerP75 * 1.1;
+        const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 1.0, 20.0);
         const rounded = Number(newVal.toFixed(1));
         if (rounded > current) {
           changes.maxVolatility = rounded;
@@ -361,19 +371,20 @@ export function evolveThresholds(perfData, config) {
   // Raise the floor if low-fee pools consistently underperform.
   {
     const winnerFees = winners.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
-    const loserFees  = losers.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
-    const current    = config.screening.minFeeTvlRatio;
+    const loserFees = losers.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
+    const current =
+      config.screening.minFeeActiveTvlRatio ?? config.screening.minFeeTvlRatio ?? 0.06;
 
     if (winnerFees.length >= 2) {
       // Minimum fee/TVL among winners — we know pools below this don't work for us
       const minWinnerFee = Math.min(...winnerFees);
       if (minWinnerFee > current * 1.2) {
-        const target  = minWinnerFee * 0.85; // stay slightly below min winner
-        const newVal  = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
+        const target = minWinnerFee * 0.85; // stay slightly below min winner
+        const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
         const rounded = Number(newVal.toFixed(2));
         if (rounded > current) {
-          changes.minFeeTvlRatio = rounded;
-          rationale.minFeeTvlRatio = `Lowest winner fee_tvl=${minWinnerFee.toFixed(2)} — raised floor from ${current} → ${rounded}`;
+          changes.minFeeActiveTvlRatio = rounded;
+          rationale.minFeeActiveTvlRatio = `Lowest winner fee_tvl=${minWinnerFee.toFixed(2)} — raised floor from ${current} → ${rounded}`;
         }
       }
     }
@@ -385,12 +396,12 @@ export function evolveThresholds(perfData, config) {
       if (maxLoserFee < current * 1.5 && winnerFees.length > 0) {
         const minWinnerFee = Math.min(...winnerFees);
         if (minWinnerFee > maxLoserFee) {
-          const target  = maxLoserFee * 1.2;
-          const newVal  = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
+          const target = maxLoserFee * 1.2;
+          const newVal = clamp(nudge(current, target, MAX_CHANGE_PER_STEP), 0.05, 10.0);
           const rounded = Number(newVal.toFixed(2));
-          if (rounded > current && !changes.minFeeTvlRatio) {
-            changes.minFeeTvlRatio = rounded;
-            rationale.minFeeTvlRatio = `Losers had fee_tvl<=${maxLoserFee.toFixed(2)}, winners higher — raised floor from ${current} → ${rounded}`;
+          if (rounded > current && !changes.minFeeActiveTvlRatio) {
+            changes.minFeeActiveTvlRatio = rounded;
+            rationale.minFeeActiveTvlRatio = `Losers had fee_tvl<=${maxLoserFee.toFixed(2)}, winners higher — raised floor from ${current} → ${rounded}`;
           }
         }
       }
@@ -400,12 +411,12 @@ export function evolveThresholds(perfData, config) {
   // ── 3. minOrganic ─────────────────────────────────────────────
   // Raise organic floor if low-organic tokens consistently failed.
   {
-    const loserOrganics  = losers.map((p) => p.organic_score).filter(isFiniteNum);
+    const loserOrganics = losers.map((p) => p.organic_score).filter(isFiniteNum);
     const winnerOrganics = winners.map((p) => p.organic_score).filter(isFiniteNum);
-    const current        = config.screening.minOrganic;
+    const current = config.screening.minOrganic;
 
     if (loserOrganics.length >= 2 && winnerOrganics.length >= 1) {
-      const avgLoserOrganic  = avg(loserOrganics);
+      const avgLoserOrganic = avg(loserOrganics);
       const avgWinnerOrganic = avg(winnerOrganics);
       // Only raise if there's a clear gap (winners consistently more organic)
       if (avgWinnerOrganic - avgLoserOrganic >= 10) {
@@ -426,7 +437,11 @@ export function evolveThresholds(perfData, config) {
   // ── Persist changes to user-config.json ───────────────────────
   let userConfig = {};
   if (fs.existsSync(USER_CONFIG_PATH)) {
-    try { userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")); } catch { /* ignore */ }
+    try {
+      userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
+    } catch {
+      /* ignore */
+    }
   }
 
   Object.assign(userConfig, changes);
@@ -437,15 +452,17 @@ export function evolveThresholds(perfData, config) {
 
   // Apply to live config object immediately
   const s = config.screening;
-  if (changes.maxVolatility    != null) s.maxVolatility    = changes.maxVolatility;
-  if (changes.minFeeTvlRatio   != null) s.minFeeTvlRatio   = changes.minFeeTvlRatio;
-  if (changes.minOrganic       != null) s.minOrganic       = changes.minOrganic;
+  if (changes.maxVolatility != null) s.maxVolatility = changes.maxVolatility;
+  if (changes.minFeeTvlRatio != null) s.minFeeTvlRatio = changes.minFeeTvlRatio;
+  if (changes.minOrganic != null) s.minOrganic = changes.minOrganic;
 
   // Log a lesson summarizing the evolution
   const data = load();
   data.lessons.push({
     id: Date.now(),
-    rule: `[AUTO-EVOLVED @ ${perfData.length} positions] ${Object.entries(changes).map(([k, v]) => `${k}=${v}`).join(", ")} — ${Object.values(rationale).join("; ")}`,
+    rule: `[AUTO-EVOLVED @ ${perfData.length} positions] ${Object.entries(changes)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ")} — ${Object.values(rationale).join("; ")}`,
     tags: ["evolution", "config_change"],
     outcome: "manual",
     created_at: new Date().toISOString(),
@@ -505,14 +522,18 @@ export function addLesson(rule, tags = [], { pinned = false, role = null } = {})
     rule: safeRule,
     tags,
     outcome: "manual",
-    sourceType: tags.includes("self_tune") || tags.includes("config_change") ? "config_change" : "manual",
+    sourceType:
+      tags.includes("self_tune") || tags.includes("config_change") ? "config_change" : "manual",
     pinned: !!pinned,
     role: role || null,
     created_at: new Date().toISOString(),
   };
   data.lessons.push(lesson);
   save(data);
-  log("lessons", `Manual lesson added${pinned ? " [PINNED]" : ""}${role ? ` [${role}]` : ""}: ${safeRule}`);
+  log(
+    "lessons",
+    `Manual lesson added${pinned ? " [PINNED]" : ""}${role ? ` [${role}]` : ""}: ${safeRule}`,
+  );
   void pushHiveLesson(lesson);
 }
 
@@ -549,8 +570,8 @@ export function listLessons({ role = null, pinned = null, tag = null, limit = 30
   let lessons = [...data.lessons];
 
   if (pinned !== null) lessons = lessons.filter((l) => !!l.pinned === pinned);
-  if (role)            lessons = lessons.filter((l) => !l.role || l.role === role);
-  if (tag)             lessons = lessons.filter((l) => l.tags?.includes(tag));
+  if (role) lessons = lessons.filter((l) => !l.role || l.role === role);
+  if (tag) lessons = lessons.filter((l) => l.tags?.includes(tag));
 
   return {
     total: lessons.length,
@@ -604,9 +625,44 @@ export function clearPerformance() {
 
 // Tags that map to each agent role — used for role-aware lesson injection
 const ROLE_TAGS = {
-  SCREENER: ["screening", "narrative", "strategy", "deployment", "token", "volume", "entry", "bundler", "holders", "organic"],
-  MANAGER:  ["management", "risk", "oor", "fees", "position", "hold", "close", "pnl", "rebalance", "claim"],
-  GENERAL:  [], // all lessons
+  SCREENER: [
+    "screening",
+    "narrative",
+    "strategy",
+    "deployment",
+    "token",
+    "volume",
+    "entry",
+    "bundler",
+    "holders",
+    "organic",
+    "oor",
+    "bid_ask",
+    "worked",
+    "efficient",
+    "volume_collapse",
+    "failed",
+    "config_optimizer",
+    "dry_run",
+    "self_tune",
+  ],
+  MANAGER: [
+    "management",
+    "risk",
+    "oor",
+    "fees",
+    "position",
+    "hold",
+    "close",
+    "pnl",
+    "rebalance",
+    "claim",
+    "worked",
+    "failed",
+    "efficient",
+    "volume_collapse",
+  ],
+  GENERAL: [], // all lessons
 };
 
 /**
@@ -631,12 +687,22 @@ export function getLessonsForPrompt(opts = {}) {
 
   // Smaller caps for automated cycles — they don't need the full lesson history
   const isAutoCycle = agentType === "SCREENER" || agentType === "MANAGER";
-  const PINNED_CAP  = isAutoCycle ? 5  : 10;
-  const ROLE_CAP    = isAutoCycle ? 6  : 15;
-  const RECENT_CAP  = maxLessons ?? (isAutoCycle ? 10 : 35);
+  const PINNED_CAP = isAutoCycle ? 5 : 10;
+  const ROLE_CAP = isAutoCycle ? 6 : 15;
+  const RECENT_CAP = maxLessons ?? (isAutoCycle ? 10 : 35);
 
-  const outcomePriority = { bad: 0, poor: 1, failed: 1, good: 2, worked: 2, manual: 1, neutral: 3, evolution: 2 };
-  const byPriority = (a, b) => (outcomePriority[a.outcome] ?? 3) - (outcomePriority[b.outcome] ?? 3);
+  const outcomePriority = {
+    bad: 0,
+    poor: 1,
+    failed: 1,
+    good: 2,
+    worked: 2,
+    manual: 1,
+    neutral: 3,
+    evolution: 2,
+  };
+  const byPriority = (a, b) =>
+    (outcomePriority[a.outcome] ?? 3) - (outcomePriority[b.outcome] ?? 3);
 
   // ── Tier 1: Pinned ──────────────────────────────────────────────
   // Respect role even for pinned lessons — a pinned SCREENER lesson shouldn't pollute MANAGER
@@ -655,7 +721,8 @@ export function getLessonsForPrompt(opts = {}) {
       // Include if: lesson has no role restriction OR matches this role
       const roleOk = !l.role || l.role === agentType || agentType === "GENERAL";
       // Include if: lesson has role-relevant tags OR no tags (general)
-      const tagOk  = roleTags.length === 0 || !l.tags?.length || l.tags.some((t) => roleTags.includes(t));
+      const tagOk =
+        roleTags.length === 0 || !l.tags?.length || l.tags.some((t) => roleTags.includes(t));
       return roleOk && tagOk;
     })
     .sort(byPriority)
@@ -665,12 +732,13 @@ export function getLessonsForPrompt(opts = {}) {
 
   // ── Tier 3: Recent fill ─────────────────────────────────────────
   const remainingBudget = RECENT_CAP - pinned.length - roleMatched.length;
-  const recent = remainingBudget > 0
-    ? data.lessons
-        .filter((l) => !usedIds.has(l.id))
-        .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
-        .slice(0, remainingBudget)
-    : [];
+  const recent =
+    remainingBudget > 0
+      ? data.lessons
+          .filter((l) => !usedIds.has(l.id))
+          .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
+          .slice(0, remainingBudget)
+      : [];
 
   const selected = [...pinned, ...roleMatched, ...recent];
   const shared = getSharedLessonsForPrompt({
@@ -680,20 +748,23 @@ export function getLessonsForPrompt(opts = {}) {
   if (selected.length === 0 && !shared) return null;
 
   const sections = [];
-  if (pinned.length)      sections.push(`── PINNED (${pinned.length}) ──\n` + fmt(pinned));
-  if (roleMatched.length) sections.push(`── ${agentType} (${roleMatched.length}) ──\n` + fmt(roleMatched));
-  if (recent.length)      sections.push(`── RECENT (${recent.length}) ──\n` + fmt(recent));
-  if (shared)             sections.push(`── HIVEMIND ──\n${shared}`);
+  if (pinned.length) sections.push(`── PINNED (${pinned.length}) ──\n` + fmt(pinned));
+  if (roleMatched.length)
+    sections.push(`── ${agentType} (${roleMatched.length}) ──\n` + fmt(roleMatched));
+  if (recent.length) sections.push(`── RECENT (${recent.length}) ──\n` + fmt(recent));
+  if (shared) sections.push(`── HIVEMIND ──\n${shared}`);
 
   return sections.join("\n\n");
 }
 
 function fmt(lessons) {
-  return lessons.map((l) => {
-    const date = l.created_at ? l.created_at.slice(0, 16).replace("T", " ") : "unknown";
-    const pin  = l.pinned ? "📌 " : "";
-    return `${pin}[${l.outcome.toUpperCase()}] [${date}] ${l.rule}`;
-  }).join("\n");
+  return lessons
+    .map((l) => {
+      const date = l.created_at ? l.created_at.slice(0, 16).replace("T", " ") : "unknown";
+      const pin = l.pinned ? "📌 " : "";
+      return `${pin}[${l.outcome.toUpperCase()}] [${date}] ${l.rule}`;
+    })
+    .join("\n");
 }
 
 /**
@@ -759,7 +830,11 @@ export function getPerformanceSummary() {
     total_pnl_usd: Math.round(totalPnl * 100) / 100,
     avg_pnl_pct: Math.round(avgPnlPct * 100) / 100,
     avg_range_efficiency_pct: Math.round(avgRangeEfficiency * 10) / 10,
-    win_rate_pct: Math.round((wins / p.length) * 100),
+    win_rate_pct: (() => {
+      const losses = p.filter((x) => x.pnl_usd < 0).length;
+      const denom = wins + losses;
+      return denom > 0 ? Math.round((wins / denom) * 100) : 0;
+    })(),
     total_lessons: data.lessons.length,
   };
 }
