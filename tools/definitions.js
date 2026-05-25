@@ -213,6 +213,57 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
     },
   },
 
+  {
+    type: "function",
+    function: {
+      name: "simulate_lp_position",
+      description: `Replay real 5m OHLCV candles to estimate fees, IL, and in-range time for a hypothetical LP position before deploying.
+Useful when you want to compare Spot vs Curve vs Bid-Ask, or sanity-check a candidate pool by seeing what the same range would have earned over the recent past.
+
+Inputs: pool_address, amount_sol (deploy size in SOL), bins_below, bins_above (default 0), strategy ('spot' | 'curve' | 'bid_ask'), hours (lookback window, default 24, max 168).
+
+Returns: feesEarned (USD), ilUsd, ilPct, netPnL, inRangePct, tvlShareAvg, annualizedFeeApr, candles_used, data_source ('geckoterminal' or 'pool_snapshot_fallback').
+
+This is a read-only estimate — no on-chain transactions, no state changes. Falls back to a pool snapshot if the OHLCV feed is unavailable (IL becomes approximate).`,
+      parameters: {
+        type: "object",
+        properties: {
+          pool_address: {
+            type: "string",
+            description: "The DLMM pool address to simulate",
+          },
+          amount_sol: {
+            type: "number",
+            description: "Hypothetical SOL deploy amount (single-side SOL)",
+          },
+          bins_below: {
+            type: "number",
+            description: "Bins below the active bin (main range input for single-side SOL)",
+          },
+          bins_above: {
+            type: "number",
+            description: "Bins above the active bin (default 0 for single-side SOL)",
+          },
+          strategy: {
+            type: "string",
+            enum: ["spot", "curve", "bid_ask"],
+            description:
+              "Liquidity distribution: spot (uniform), curve (bell/center-weighted), bid_ask (edge-weighted)",
+          },
+          hours: {
+            type: "number",
+            description: "Lookback window in hours (default 24, max 168)",
+          },
+          sol_price_usd: {
+            type: "number",
+            description: "Optional SOL price override for USD conversion (default ~160)",
+          },
+        },
+        required: ["pool_address", "amount_sol", "bins_below"],
+      },
+    },
+  },
+
   // ═══════════════════════════════════════════
   //  POSITION MANAGEMENT TOOLS
   // ═══════════════════════════════════════════
