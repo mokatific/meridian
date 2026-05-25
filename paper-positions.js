@@ -59,6 +59,22 @@ async function fetchPoolDetail(poolAddress) {
 }
 
 /**
+ * Fetch the close of the most recent 5m candle from GeckoTerminal. Used at
+ * open time to detect the price-scale offset between datapi's pool price and
+ * the OHLCV feed (token-decimal differences cause ~1000x discrepancies).
+ */
+async function fetchLatestCandleClose(poolAddress) {
+  const url = `${GECKO_BASE}/networks/solana/pools/${poolAddress}/ohlcv/minute?aggregate=5&limit=1&currency=usd`;
+  const res = await fetch(url, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`GeckoTerminal ${res.status}`);
+  const data = await res.json();
+  const row = data?.data?.attributes?.ohlcv_list?.[0];
+  if (!row) return null;
+  const close = Number(row[4]);
+  return Number.isFinite(close) && close > 0 ? close : null;
+}
+
+/**
  * Fetch up to `limit` 5m candles, newest-first from GeckoTerminal. The caller
  * filters down to candles strictly newer than `sinceMs`.
  */
@@ -127,6 +143,28 @@ function computeInitialSplit({ amountUsd, activePrice, lowerPrice, upperPrice })
 }
 
 /**
+ * IL for a concentrated-liquidity LP position, as a deposit-relative ratio.
+ *
+ *   IL_ratio = (2√r / (1 + r) - 1) × √(upperPrice / lowerPrice)
+ *
+ * where r = effectivePrice / entryPrice, with effectivePrice clamped to
+ * [lowerPrice, upperPrice] so price excursions outside the range stop
+ * contributing further loss. Multiply by the deposit amount to get USD.
+ *
+ * Replaces the old USD-fraction rebalance that silently summed to the
+ * deposit amount when entry == upper (single-side SOL), masking real IL.
+ */
+function computeIlRatio({ entryPrice, currentPrice, lowerPrice, upperPrice }) {
+  if (!(entryPrice > 0) || !(lowerPrice > 0) || !(upperPrice > 0)) return 0;
+  const effective = Math.min(Math.max(currentPrice, lowerPrice), upperPrice);
+  const r = effective / entryPrice;
+  if (!(r > 0)) return 0;
+  const baseIl = (2 * Math.sqrt(r)) / (1 + r) - 1;
+  const rangeMultiplier = Math.sqrt(upperPrice / lowerPrice);
+  return baseIl * rangeMultiplier;
+}
+
+/**
  * Recompute LP value (in USD) at a given price, using stored liquidity L and
  * the original range [Pa, Pb].
  */
@@ -147,6 +185,59 @@ function computeLpValue({ L, lowerPrice, upperPrice, currentPrice }) {
   const xTokens = (L * (spb - sp)) / (sp * spb);
   const yUsd = L * (sp - spa);
   return { xTokens, yUsd, valueUsd: xTokens * currentPrice + yUsd };
+}
+
+// ─── Summary formatting ────────────────────────────────────────
+
+/**
+ * Map a persisted position row to the curated shape returned by the tool
+ * layer. Centralising this here means open/get/close all agree on the field
+ * set.
+ */
+function formatSummary(pos) {
+  const inRangePct =
+    pos.total_candles_seen > 0
+      ? round((pos.in_range_candles / pos.total_candles_seen) * 100, 1)
+      : null;
+  return {
+    id: pos.id,
+    pool_address: pos.pool_address,
+    pool_name: pos.pool_name,
+    base_symbol: pos.base_symbol,
+    quote_symbol: pos.quote_symbol,
+    strategy: pos.strategy,
+    status: pos.status,
+    opened_at: pos.opened_at,
+    closed_at: pos.closed_at,
+    close_reason: pos.close_reason ?? null,
+    note: pos.note ?? null,
+    amount_sol: pos.amount_sol,
+    sol_usd_at_open: pos.sol_usd_at_open,
+    initial_value_usd: pos.initial_value_usd,
+    current_value_usd: pos.current_value_usd,
+    fees_earned_usd: pos.fees_earned_usd,
+    il_usd: pos.il_usd,
+    il_pct: pos.il_pct,
+    net_pnl_usd: pos.net_pnl_usd,
+    in_range_pct: inRangePct,
+    total_candles_seen: pos.total_candles_seen,
+    in_range_candles: pos.in_range_candles,
+    range: {
+      lower: pos.lower_price,
+      upper: pos.upper_price,
+      entry: pos.entry_price ?? pos.active_price,
+    },
+    bins_below: pos.bins_below,
+    bins_above: pos.bins_above,
+    bin_step: pos.bin_step,
+    fee_pct: pos.fee_pct,
+    tvl_share: pos.tvl_share,
+    pool_tvl_usd_at_open: pos.pool_tvl_usd_at_open,
+    price_scale: pos.price_scale ?? 1,
+    raw_active_price: pos.raw_active_price ?? null,
+    last_price: pos.last_price,
+    last_tick_at: pos.last_tick_at,
+  };
 }
 
 // ─── Public API ────────────────────────────────────────────────
@@ -175,25 +266,37 @@ export async function openPaperPosition({
     throw new Error(`strategy must be one of: ${[...STRATEGIES].join(", ")}`);
   }
 
-  const pool = await fetchPoolDetail(pool_address);
+  const [pool, latestCandleClose] = await Promise.all([
+    fetchPoolDetail(pool_address),
+    fetchLatestCandleClose(pool_address).catch(() => null),
+  ]);
   const binStep = num(pool?.dlmm_params?.bin_step ?? pool?.pool_config?.bin_step, null);
   if (!(binStep > 0)) throw new Error("Could not read pool bin_step");
   const feePct = num(pool?.fee_pct ?? pool?.base_fee_pct, null);
   if (!(feePct > 0)) throw new Error("Could not read pool fee_pct");
-  const activePrice = num(pool?.current_price ?? pool?.price, null);
-  if (!(activePrice > 0)) throw new Error("Could not read pool current_price");
+  const rawActivePrice = num(pool?.current_price ?? pool?.price, null);
+  if (!(rawActivePrice > 0)) throw new Error("Could not read pool current_price");
   const poolTvlUsd = num(pool?.tvl ?? pool?.active_tvl, 0);
 
-  const lowerPrice = priceFromBinOffset(activePrice, binStep, -binsBelow);
+  // Price-scale normalization: datapi's pool price and GeckoTerminal's OHLCV
+  // close can disagree by orders of magnitude (token decimal mismatches).
+  // Anchor everything to the OHLCV scale so subsequent ticks compare directly
+  // against stored lower/upper bounds. Fall back to 1.0 if the candle feed
+  // is unavailable.
+  const priceScale =
+    latestCandleClose && latestCandleClose > 0 ? latestCandleClose / rawActivePrice : 1;
+
+  const entryPrice = rawActivePrice * priceScale;
+  const lowerPrice = priceFromBinOffset(entryPrice, binStep, -binsBelow);
   const upperPrice =
-    binsAbove > 0 ? priceFromBinOffset(activePrice, binStep, binsAbove) : activePrice;
+    binsAbove > 0 ? priceFromBinOffset(entryPrice, binStep, binsAbove) : entryPrice;
 
   const solUsd = num(sol_price_usd, DEFAULT_SOL_USD);
   const initialValueUsd = amountSol * solUsd;
 
   const { L, xTokens, yUsd } = computeInitialSplit({
     amountUsd: initialValueUsd,
-    activePrice,
+    activePrice: entryPrice,
     lowerPrice,
     upperPrice,
   });
@@ -221,7 +324,10 @@ export async function openPaperPosition({
     fee_pct: feePct,
     bins_below: binsBelow,
     bins_above: binsAbove,
-    active_price: activePrice,
+    raw_active_price: rawActivePrice,
+    price_scale: priceScale,
+    entry_price: entryPrice,
+    active_price: entryPrice,
     lower_price: lowerPrice,
     upper_price: upperPrice,
     pool_tvl_usd_at_open: poolTvlUsd,
@@ -230,7 +336,7 @@ export async function openPaperPosition({
     x_initial: xTokens,
     y_initial_usd: round(yUsd, 4),
     last_candle_timestamp: now,
-    last_price: activePrice,
+    last_price: entryPrice,
     last_tick_at: null,
     fees_earned_usd: 0,
     in_range_candles: 0,
@@ -247,7 +353,7 @@ export async function openPaperPosition({
   data.positions[id] = position;
   save(data);
   log("paper", `Opened ${id} on ${pool_address.slice(0, 8)} (${strategyKey}, ${amountSol} SOL)`);
-  return position;
+  return formatSummary(position);
 }
 
 /**
@@ -327,10 +433,14 @@ async function tickOne(pos) {
     upperPrice: pos.upper_price,
     currentPrice: latestPrice,
   });
-  // HODL = original SOL value, SOL/USD held constant from open
-  const hodlUsd = pos.initial_value_usd;
-  const ilUsd = lp.valueUsd - hodlUsd;
-  const ilPct = (ilUsd / pos.initial_value_usd) * 100;
+  const ilRatio = computeIlRatio({
+    entryPrice: pos.entry_price ?? pos.active_price,
+    currentPrice: latestPrice,
+    lowerPrice: pos.lower_price,
+    upperPrice: pos.upper_price,
+  });
+  const ilUsd = pos.initial_value_usd * ilRatio;
+  const ilPct = ilRatio * 100;
   const netPnl = feesUsd + ilUsd;
 
   return {
@@ -356,20 +466,14 @@ export function getPaperPosition({ id }) {
   const data = load();
   const pos = data.positions[id];
   if (!pos) return { error: `Paper position ${id} not found` };
-  const inRangePct =
-    pos.total_candles_seen > 0
-      ? round((pos.in_range_candles / pos.total_candles_seen) * 100, 1)
-      : null;
   const durationMs = Date.now() - pos.opened_at_ts;
   const durationDays = Math.max(durationMs / 86_400_000, 1 / 1440);
   const annualizedFeeApr =
     pos.initial_value_usd > 0
       ? round((pos.fees_earned_usd / pos.initial_value_usd) * (365 / durationDays) * 100, 2)
       : null;
-  const { _lastTickNewCandles, ...clean } = pos;
   return {
-    ...clean,
-    in_range_pct: inRangePct,
+    ...formatSummary(pos),
     annualized_fee_apr_pct: annualizedFeeApr,
     age_hours: round(durationMs / 3_600_000, 2),
   };
