@@ -210,68 +210,88 @@ import { getDecisionSummary } from "./decision-log.js";
 // it from the raw response after the SDK parses (the SDK itself discards unknown fields).
 let _lastRawJson = null;
 
-const client = new OpenAI({
-  baseURL: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
-  apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY,
-  timeout: 5 * 60 * 1000,
-  maxRetries: 0, // Disable SDK internal retries — we handle 429/5xx ourselves
-  fetch: async (url, init) => {
-    // Strip headers that cause 9router to hide reasoning_content
-    if (init.headers) {
-      const filtered = {};
-      for (const [k, v] of Object.entries(init.headers)) {
-        if (k === "authorization" || k === "content-type" || k === "content-length") {
-          filtered[k] = v;
+const PRIMARY_LLM_BASE_URL = process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1";
+const PRIMARY_LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY;
+const FALLBACK_LLM_BASE_URL =
+  process.env.LLM_FALLBACK_BASE_URL ||
+  (PRIMARY_LLM_BASE_URL.includes("swiftrouter.com") ? "https://openrouter.ai/api/v1" : null);
+const FALLBACK_LLM_API_KEY =
+  process.env.LLM_FALLBACK_API_KEY ||
+  (FALLBACK_LLM_BASE_URL ? process.env.OPENROUTER_API_KEY || process.env.LLM_API_KEY : null);
+const ENABLE_LLM_FALLBACK_SWITCHING =
+  /^true$/i.test(process.env.LLM_ENABLE_FALLBACK_SWITCHING || "") &&
+  !!FALLBACK_LLM_BASE_URL &&
+  !!FALLBACK_LLM_API_KEY;
+
+function createLlmClient(baseURL, apiKey) {
+  return new OpenAI({
+    baseURL,
+    apiKey,
+    timeout: 5 * 60 * 1000,
+    maxRetries: 0, // Disable SDK internal retries — we handle 429/5xx ourselves
+    fetch: async (url, init) => {
+      // Strip headers that cause 9router to hide reasoning_content
+      if (init.headers) {
+        const filtered = {};
+        for (const [k, v] of Object.entries(init.headers)) {
+          if (k === "authorization" || k === "content-type" || k === "content-length") {
+            filtered[k] = v;
+          }
+        }
+        init.headers = filtered;
+      }
+      const response = await globalThis.fetch(url, init);
+      const rawText = await response.text();
+      // Parse raw response — handle both clean JSON and SSE-wrapped format
+      let _needsClean = false;
+      try {
+        _lastRawJson = JSON.parse(rawText);
+      } catch (_) {
+        // 9router sometimes appends SSE suffix to JSON: "{...}data: [DONE]\n\n"
+        // Or wraps entirely: "data: {...}data: [DONE]\n\n"
+        _needsClean = true;
+        let cleaned = rawText;
+        if (cleaned.startsWith("data:")) {
+          cleaned = cleaned.replace(/^data:\s*/, "");
+        }
+        cleaned = cleaned.replace(/\s*data:\s*\[DONE\]\s*$/, "").trim();
+        try {
+          _lastRawJson = JSON.parse(cleaned);
+        } catch (_2) {
+          _lastRawJson = null;
         }
       }
-      init.headers = filtered;
-    }
-    const response = await globalThis.fetch(url, init);
-    const rawText = await response.text();
-    // Parse raw response — handle both clean JSON and SSE-wrapped format
-    let _needsClean = false;
-    try {
-      _lastRawJson = JSON.parse(rawText);
-    } catch (_) {
-      // 9router sometimes appends SSE suffix to JSON: "{...}data: [DONE]\n\n"
-      // Or wraps entirely: "data: {...}data: [DONE]\n\n"
-      _needsClean = true;
-      let cleaned = rawText;
-      if (cleaned.startsWith("data:")) {
-        cleaned = cleaned.replace(/^data:\s*/, "");
-      }
-      cleaned = cleaned.replace(/\s*data:\s*\[DONE\]\s*$/, "").trim();
-      try {
-        _lastRawJson = JSON.parse(cleaned);
-      } catch (_2) {
-        _lastRawJson = null;
-      }
-    }
-    // Return a fresh Response so the SDK can parse it cleanly
-    // If raw wasn't valid JSON but we extracted it, return the clean version
-    let responseBody = _needsClean && _lastRawJson ? JSON.stringify(_lastRawJson) : rawText;
+      // Return a fresh Response so the SDK can parse it cleanly
+      // If raw wasn't valid JSON but we extracted it, return the clean version
+      let responseBody = _needsClean && _lastRawJson ? JSON.stringify(_lastRawJson) : rawText;
 
-    // 🧹 Strip reasoning_content and promote to content for SDK compatibility
-    // Reasoning models (deepseek-v4-pro, etc.) return reasoning_content which
-    // OpenAI SDK doesn't recognize → parse failure → agent can't see tool calls.
-    // By merging reasoning_content into content and removing the unknown field,
-    // the SDK sees a standard response and parses it successfully.
-    if (_lastRawJson?.choices?.[0]?.message?.reasoning_content) {
-      const msg = _lastRawJson.choices[0].message;
-      if (!msg.content) {
-        msg.content = msg.reasoning_content;
+      // 🧹 Strip reasoning_content and promote to content for SDK compatibility
+      // Reasoning models (deepseek-v4-pro, etc.) return reasoning_content which
+      // OpenAI SDK doesn't recognize → parse failure → agent can't see tool calls.
+      // By merging reasoning_content into content and removing the unknown field,
+      // the SDK sees a standard response and parses it successfully.
+      if (_lastRawJson?.choices?.[0]?.message?.reasoning_content) {
+        const msg = _lastRawJson.choices[0].message;
+        if (!msg.content) {
+          msg.content = msg.reasoning_content;
+        }
+        delete msg.reasoning_content;
+        responseBody = JSON.stringify(_lastRawJson);
       }
-      delete msg.reasoning_content;
-      responseBody = JSON.stringify(_lastRawJson);
-    }
 
-    return new Response(responseBody, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    });
-  },
-});
+      return new Response(responseBody, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    },
+  });
+}
+
+const primaryClient = createLlmClient(PRIMARY_LLM_BASE_URL, PRIMARY_LLM_API_KEY);
+const fallbackClient = ENABLE_LLM_FALLBACK_SWITCHING
+  ? createLlmClient(FALLBACK_LLM_BASE_URL, FALLBACK_LLM_API_KEY)
+  : null;
 
 const DEFAULT_MODEL = process.env.LLM_MODEL || "openrouter/healer-alpha";
 
@@ -321,6 +341,17 @@ function isSystemRoleError(error) {
 function isToolChoiceRequiredError(error) {
   const message = String(error?.message || error?.error?.message || error || "");
   return /tool_choice/i.test(message) || /tool_choice/i.test(error?.error?.message || "");
+}
+
+function isTransientProviderError(error) {
+  const status = error?.status || error?.response?.status || error?.error?.status;
+  return (
+    status === 429 ||
+    (status >= 500 && status < 600) ||
+    /timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|fetch failed|aborted|rate.?limit/i.test(
+      String(error?.message || error?.error?.message || error || ""),
+    )
+  );
 }
 
 /**
@@ -394,8 +425,11 @@ export async function agentLoop(
 
       // Retry up to 3 times on transient provider errors (502, 503, 529)
       const FALLBACK_MODEL = "deepseek-flash-combo";
+      const providers = fallbackClient ? [primaryClient, fallbackClient] : [primaryClient];
       let response;
       let usedModel = activeModel;
+      let usedClient = providers[0];
+      let providerSwitched = false;
       // Force a tool call on step 0 for action intents — prevents the model from inventing deploy/close outcomes.
       // SCREENER is excluded: it may legitimately decide no candidate qualifies and answer without a tool call.
       const ACTION_INTENTS =
@@ -407,7 +441,7 @@ export async function agentLoop(
 
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
-          response = await client.chat.completions.create({
+          response = await usedClient.chat.completions.create({
             model: usedModel,
             messages,
             tools: getToolsForRole(agentType, goal),
@@ -432,12 +466,33 @@ export async function agentLoop(
             attempt -= 1;
             continue;
           }
-          // Handle 429 rate limit with exponential backoff
-          if (error.status === 429 || error?.error?.code === 429) {
-            const backoff = Math.min(30000, (attempt + 1) * 10000); // 10s, 20s, 30s
+          if (isTransientProviderError(error)) {
+            if (!providerSwitched && providers.length > 1) {
+              providerSwitched = true;
+              usedClient = providers[1];
+              log(
+                "agent",
+                `Provider error ${error.status || error?.response?.status || "N/A"} — switching to fallback endpoint`,
+              );
+              attempt -= 1;
+              continue;
+            }
+
+            // Handle 429 rate limit with exponential backoff
+            if (error.status === 429 || error?.error?.code === 429) {
+              const backoff = Math.min(30000, (attempt + 1) * 10000); // 10s, 20s, 30s
+              log(
+                "agent",
+                `Rate limited (429), backing off ${backoff / 1000}s (attempt ${attempt + 1}/4)`,
+              );
+              await new Promise((r) => setTimeout(r, backoff));
+              continue;
+            }
+
+            const backoff = Math.min(30000, (attempt + 1) * 5000);
             log(
               "agent",
-              `Rate limited (429), backing off ${backoff / 1000}s (attempt ${attempt + 1}/4)`,
+              `Transient provider error ${error.status || error?.response?.status || "N/A"}, retrying in ${backoff / 1000}s (attempt ${attempt + 1}/4)`,
             );
             await new Promise((r) => setTimeout(r, backoff));
             continue;
