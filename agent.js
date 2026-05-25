@@ -11,7 +11,10 @@ const MANAGER_TOOLS = new Set([
   "get_position_pnl",
   "get_my_positions",
   "get_wallet_balance",
-  "simulate_lp_position",
+  "open_paper_position",
+  "get_paper_position",
+  "close_paper_position",
+  "list_paper_positions",
 ]);
 const SCREENER_TOOLS = new Set([
   "deploy_position",
@@ -25,7 +28,10 @@ const SCREENER_TOOLS = new Set([
   "get_pool_memory",
   "get_wallet_balance",
   "get_my_positions",
-  "simulate_lp_position",
+  "open_paper_position",
+  "get_paper_position",
+  "close_paper_position",
+  "list_paper_positions",
 ]);
 const GENERAL_INTENT_ONLY_TOOLS = new Set([
   "self_update",

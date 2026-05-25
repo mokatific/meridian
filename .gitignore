@@ -46,6 +46,7 @@ decision-log.json
 hivemind-cache.json
 signal-weights.json
 skipped-pools.json
+paper-positions.json
 
 # ============================================
 # Logs

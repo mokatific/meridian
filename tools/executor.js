@@ -41,7 +41,12 @@ import {
 } from "../smart-wallets.js";
 import { discoverWalletsFromKolTweets } from "../twitter-wallet.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
-import { simulateLpPosition } from "./simulator.js";
+import {
+  openPaperPositionTool,
+  getPaperPositionTool,
+  closePaperPositionTool,
+  listPaperPositionsTool,
+} from "./simulator.js";
 import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW } from "../config.js";
 import { getRecentDecisions } from "../decision-log.js";
 import fs from "fs";
@@ -267,7 +272,10 @@ const toolMap = {
   get_position_pnl: getPositionPnl,
   get_active_bin: getActiveBin,
   deploy_position: deployPosition,
-  simulate_lp_position: simulateLpPosition,
+  open_paper_position: openPaperPositionTool,
+  get_paper_position: getPaperPositionTool,
+  close_paper_position: closePaperPositionTool,
+  list_paper_positions: listPaperPositionsTool,
   get_my_positions: getMyPositions,
   get_wallet_positions: getWalletPositions,
   search_pools: searchPools,

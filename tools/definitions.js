@@ -216,29 +216,25 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
   {
     type: "function",
     function: {
-      name: "simulate_lp_position",
-      description: `Replay real 5m OHLCV candles to estimate fees, IL, and in-range time for a hypothetical LP position before deploying.
-Useful when you want to compare Spot vs Curve vs Bid-Ask, or sanity-check a candidate pool by seeing what the same range would have earned over the recent past.
+      name: "open_paper_position",
+      description: `Open a forward-running paper LP position on a pool.
 
-Inputs: pool_address, amount_sol (deploy size in SOL), bins_below, bins_above (default 0), strategy ('spot' | 'curve' | 'bid_ask'), hours (lookback window, default 24, max 168).
+This creates a hypothetical position with the current pool state (active price, fee%, TVL, bin step) and tracks it live over the next minutes/hours/days. A 5-minute cron ticks every open paper position against real OHLCV candles to accrue fees (when price is in range) and recompute IL via sqrt-price geometry.
 
-Returns: feesEarned (USD), ilUsd, ilPct, netPnL, inRangePct, tvlShareAvg, annualizedFeeApr, candles_used, data_source ('geckoterminal' or 'pool_snapshot_fallback').
+Use this when you want to A/B test a deploy idea without risking SOL — e.g. compare Spot vs Curve vs Bid-Ask on the same pool, or watch a candidate evolve before committing real capital. Inspect with get_paper_position or list_paper_positions.
 
-This is a read-only estimate — no on-chain transactions, no state changes. Falls back to a pool snapshot if the OHLCV feed is unavailable (IL becomes approximate).`,
+Returns the snapshot of the opened position including its id (needed for get/close).`,
       parameters: {
         type: "object",
         properties: {
-          pool_address: {
-            type: "string",
-            description: "The DLMM pool address to simulate",
-          },
+          pool_address: { type: "string", description: "DLMM pool address" },
           amount_sol: {
             type: "number",
             description: "Hypothetical SOL deploy amount (single-side SOL)",
           },
           bins_below: {
             type: "number",
-            description: "Bins below the active bin (main range input for single-side SOL)",
+            description: "Bins below the active bin (main range input)",
           },
           bins_above: {
             type: "number",
@@ -247,19 +243,69 @@ This is a read-only estimate — no on-chain transactions, no state changes. Fal
           strategy: {
             type: "string",
             enum: ["spot", "curve", "bid_ask"],
-            description:
-              "Liquidity distribution: spot (uniform), curve (bell/center-weighted), bid_ask (edge-weighted)",
-          },
-          hours: {
-            type: "number",
-            description: "Lookback window in hours (default 24, max 168)",
+            description: "Liquidity distribution shape (default 'spot')",
           },
           sol_price_usd: {
             type: "number",
-            description: "Optional SOL price override for USD conversion (default ~160)",
+            description: "Optional SOL price override for USD math (default ~160)",
+          },
+          note: {
+            type: "string",
+            description: "Optional free-form note for record-keeping (e.g. 'A/B vs real deploy')",
           },
         },
         required: ["pool_address", "amount_sol", "bins_below"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "get_paper_position",
+      description: `Get the current live state of a paper position by id.
+Returns initial deposit, current value, fees earned, IL, net PnL, in-range %, annualized fee APR, and age.`,
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Paper position id from open_paper_position" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "close_paper_position",
+      description: `Mark a paper position closed. No further ticks will accumulate fees or update IL for it. Final snapshot is preserved for later review.`,
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Paper position id" },
+          reason: { type: "string", description: "Optional reason for closing" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "list_paper_positions",
+      description: `List all paper positions with a compact summary (id, pool, strategy, status, PnL, in-range %).
+Optionally filter by status ('open' or 'closed').`,
+      parameters: {
+        type: "object",
+        properties: {
+          status: {
+            type: "string",
+            enum: ["open", "closed"],
+            description: "Filter by status. Omit to list all.",
+          },
+        },
       },
     },
   },

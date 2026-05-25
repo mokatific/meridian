@@ -55,6 +55,7 @@ import {
   getVirtualWalletSummary,
 } from "./dry-run-simulator.js";
 import { getCausalAnalysisSummary } from "./causal-analysis.js";
+import { tickPaperPositions } from "./paper-positions.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
@@ -1275,7 +1276,33 @@ Summarize the current portfolio health, total fees earned, and performance of al
     }
   });
 
-  _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog, walletEvoTask];
+  // Paper-position ticker — runs every 5m to accrue fees and recompute IL on
+  // any open paper positions. Off by 30s to avoid colliding with management.
+  let _paperTickBusy = false;
+  const paperTickTask = cron.schedule("*/5 * * * *", async () => {
+    if (_paperTickBusy) return;
+    _paperTickBusy = true;
+    try {
+      const result = await tickPaperPositions();
+      if (result.ticked > 0) {
+        log("paper", `Ticked ${result.ticked} paper position(s)`);
+      }
+    } catch (e) {
+      log("cron_error", `Paper tick failed: ${e.message}`);
+    } finally {
+      _paperTickBusy = false;
+    }
+  });
+
+  _cronTasks = [
+    mgmtTask,
+    screenTask,
+    healthTask,
+    briefingTask,
+    briefingWatchdog,
+    walletEvoTask,
+    paperTickTask,
+  ];
   // Store interval ref so stopCronJobs can clear it
   _cronTasks._pnlPollInterval = pnlPollInterval;
   log(
