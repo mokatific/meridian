@@ -74,7 +74,10 @@ export function getAndClearStagedSignals(poolAddress, baseMint = null) {
     _stagedByBaseMint.delete(data.base_mint);
   }
   const { staged_at, ...signals } = data;
-  log("signals", `Retrieved staged signals for ${poolKey.slice(0, 8)}: ${Object.keys(signals).filter(k => signals[k] != null).length} signals`);
+  log(
+    "signals",
+    `Retrieved staged signals for ${poolKey.slice(0, 8)}: ${Object.keys(signals).filter((k) => signals[k] != null).length} signals`,
+  );
   return signals;
 }
 

@@ -23,6 +23,7 @@ const SIGNAL_NAMES = [
   "mcap",
   "holder_count",
   "smart_wallets_present",
+  "smart_wallet_confidence",
   "narrative_quality",
   "study_win_rate",
   "hive_consensus",
@@ -39,6 +40,7 @@ const HIGHER_IS_BETTER = new Set([
   "holder_count",
   "study_win_rate",
   "hive_consensus",
+  "smart_wallet_confidence",
 ]);
 
 // Boolean signals — compared by win rate when present vs absent
@@ -93,11 +95,11 @@ function saveWeights(data) {
  */
 export function recalculateWeights(perfData, cfg = {}) {
   const darwin = cfg.darwin || {};
-  const windowDays    = darwin.windowDays    ?? 60;
-  const minSamples    = darwin.minSamples    ?? 10;
-  const boostFactor   = darwin.boostFactor   ?? 1.05;
-  const decayFactor   = darwin.decayFactor   ?? 0.95;
-  const weightFloor   = darwin.weightFloor   ?? 0.3;
+  const windowDays = darwin.windowDays ?? 60;
+  const minSamples = darwin.minSamples ?? 10;
+  const boostFactor = darwin.boostFactor ?? 1.05;
+  const decayFactor = darwin.decayFactor ?? 0.95;
+  const weightFloor = darwin.weightFloor ?? 0.3;
   const weightCeiling = darwin.weightCeiling ?? 2.5;
 
   const data = loadWeights();
@@ -119,16 +121,22 @@ export function recalculateWeights(perfData, cfg = {}) {
   });
 
   if (recent.length < minSamples) {
-    log("signal_weights", `Only ${recent.length} records in ${windowDays}d window (need ${minSamples}), skipping recalc`);
+    log(
+      "signal_weights",
+      `Only ${recent.length} records in ${windowDays}d window (need ${minSamples}), skipping recalc`,
+    );
     return { changes: [], weights };
   }
 
   // Classify wins and losses
-  const wins   = recent.filter((p) => (p.pnl_usd ?? 0) > 0);
+  const wins = recent.filter((p) => (p.pnl_usd ?? 0) > 0);
   const losses = recent.filter((p) => (p.pnl_usd ?? 0) <= 0);
 
   if (wins.length === 0 || losses.length === 0) {
-    log("signal_weights", `Need both wins (${wins.length}) and losses (${losses.length}) to compute lift, skipping`);
+    log(
+      "signal_weights",
+      `Need both wins (${wins.length}) and losses (${losses.length}) to compute lift, skipping`,
+    );
     return { changes: [], weights };
   }
 
@@ -147,9 +155,9 @@ export function recalculateWeights(perfData, cfg = {}) {
   }
 
   // Split into quartiles
-  const q1End    = Math.ceil(ranked.length * 0.25);
-  const q3Start  = Math.floor(ranked.length * 0.75);
-  const topQuartile    = new Set(ranked.slice(0, q1End).map(([name]) => name));
+  const q1End = Math.ceil(ranked.length * 0.25);
+  const q3Start = Math.floor(ranked.length * 0.75);
+  const topQuartile = new Set(ranked.slice(0, q1End).map(([name]) => name));
   const bottomQuartile = new Set(ranked.slice(q3Start).map(([name]) => name));
 
   // Apply boosts and decays
@@ -168,7 +176,13 @@ export function recalculateWeights(perfData, cfg = {}) {
 
     if (next !== prev) {
       const dir = next > prev ? "boosted" : "decayed";
-      changes.push({ signal, from: prev, to: next, lift: Math.round(lift * 1000) / 1000, action: dir });
+      changes.push({
+        signal,
+        from: prev,
+        to: next,
+        lift: Math.round(lift * 1000) / 1000,
+        action: dir,
+      });
       weights[signal] = next;
       log("signal_weights", `${signal}: ${prev} -> ${next} (${dir}, lift=${lift.toFixed(3)})`);
     }
@@ -191,9 +205,12 @@ export function recalculateWeights(perfData, cfg = {}) {
   }
   saveWeights(data);
 
-  log("signal_weights", changes.length > 0
-    ? `Recalculated: ${changes.length} weight(s) adjusted from ${recent.length} records`
-    : `Recalculated: no changes needed (${recent.length} records, ${ranked.length} signals evaluated)`);
+  log(
+    "signal_weights",
+    changes.length > 0
+      ? `Recalculated: ${changes.length} weight(s) adjusted from ${recent.length} records`
+      : `Recalculated: no changes needed (${recent.length} records, ${ranked.length} signals evaluated)`,
+  );
 
   return { changes, weights };
 }
@@ -201,13 +218,14 @@ export function recalculateWeights(perfData, cfg = {}) {
 // ─── Lift Computation ────────────────────────────────────────────
 
 function computeLift(signal, wins, losses, minSamples) {
-  if (BOOLEAN_SIGNALS.has(signal))      return computeBooleanLift(signal, wins, losses, minSamples);
-  if (CATEGORICAL_SIGNALS.has(signal))  return computeCategoricalLift(signal, wins, losses, minSamples);
+  if (BOOLEAN_SIGNALS.has(signal)) return computeBooleanLift(signal, wins, losses, minSamples);
+  if (CATEGORICAL_SIGNALS.has(signal))
+    return computeCategoricalLift(signal, wins, losses, minSamples);
   return computeNumericLift(signal, wins, losses, minSamples);
 }
 
 function computeNumericLift(signal, wins, losses, minSamples) {
-  const winVals  = extractNumeric(signal, wins);
+  const winVals = extractNumeric(signal, wins);
   const lossVals = extractNumeric(signal, losses);
   if (winVals.length + lossVals.length < minSamples) return null;
   if (winVals.length === 0 || lossVals.length === 0) return null;
@@ -219,30 +237,44 @@ function computeNumericLift(signal, wins, losses, minSamples) {
   if (range === 0) return 0;
 
   const normalize = (v) => (v - min) / range;
-  const winMean  = mean(winVals.map(normalize));
+  const winMean = mean(winVals.map(normalize));
   const lossMean = mean(lossVals.map(normalize));
 
   return HIGHER_IS_BETTER.has(signal) ? winMean - lossMean : Math.abs(winMean - lossMean);
 }
 
 function computeBooleanLift(signal, wins, losses, minSamples) {
-  const allEntries = [...wins.map((w) => ({ w: true, snap: w })), ...losses.map((l) => ({ w: false, snap: l }))];
-  let trueWins = 0, trueTotal = 0, falseWins = 0, falseTotal = 0;
+  const allEntries = [
+    ...wins.map((w) => ({ w: true, snap: w })),
+    ...losses.map((l) => ({ w: false, snap: l })),
+  ];
+  let trueWins = 0,
+    trueTotal = 0,
+    falseWins = 0,
+    falseTotal = 0;
 
   for (const { w, snap } of allEntries) {
     const val = getEntrySignalSnapshot(snap)?.[signal];
     if (val === undefined || val === null) continue;
-    if (val) { trueTotal++; if (w) trueWins++; }
-    else      { falseTotal++; if (w) falseWins++; }
+    if (val) {
+      trueTotal++;
+      if (w) trueWins++;
+    } else {
+      falseTotal++;
+      if (w) falseWins++;
+    }
   }
 
   if (trueTotal + falseTotal < minSamples) return null;
   if (trueTotal === 0 || falseTotal === 0) return null;
-  return (trueWins / trueTotal) - (falseWins / falseTotal);
+  return trueWins / trueTotal - falseWins / falseTotal;
 }
 
 function computeCategoricalLift(signal, wins, losses, minSamples) {
-  const allEntries = [...wins.map((w) => ({ w: true, snap: w })), ...losses.map((l) => ({ w: false, snap: l }))];
+  const allEntries = [
+    ...wins.map((w) => ({ w: true, snap: w })),
+    ...losses.map((l) => ({ w: false, snap: l })),
+  ];
   const buckets = {};
 
   for (const { w, snap } of allEntries) {
@@ -256,7 +288,9 @@ function computeCategoricalLift(signal, wins, losses, minSamples) {
   const totalSamples = Object.values(buckets).reduce((s, b) => s + b.total, 0);
   if (totalSamples < minSamples) return null;
 
-  const rates = Object.values(buckets).filter((b) => b.total >= 2).map((b) => b.wins / b.total);
+  const rates = Object.values(buckets)
+    .filter((b) => b.total >= 2)
+    .map((b) => b.wins / b.total);
   if (rates.length < 2) return null;
   return Math.max(...rates) - Math.min(...rates);
 }
@@ -295,14 +329,12 @@ export function getWeightsSummary() {
   const w = data.weights || {};
 
   const lines = ["Signal Weights (Darwinian — learned from past positions):"];
-  const sorted = SIGNAL_NAMES
-    .filter((s) => w[s] != null)
-    .sort((a, b) => (w[b] ?? 1) - (w[a] ?? 1));
+  const sorted = SIGNAL_NAMES.filter((s) => w[s] != null).sort((a, b) => (w[b] ?? 1) - (w[a] ?? 1));
 
   for (const signal of sorted) {
     const val = w[signal] ?? 1.0;
     const label = interpretWeight(val);
-    const bar   = weightBar(val);
+    const bar = weightBar(val);
     lines.push(`  ${signal.padEnd(24)} ${val.toFixed(2)}  ${bar}  ${label}`);
   }
 
@@ -324,7 +356,7 @@ function interpretWeight(val) {
 }
 
 function weightBar(val) {
-  const filled  = Math.round(((val - 0.3) / (2.5 - 0.3)) * 10);
+  const filled = Math.round(((val - 0.3) / (2.5 - 0.3)) * 10);
   const clamped = Math.max(0, Math.min(10, filled));
   return "#".repeat(clamped) + ".".repeat(10 - clamped);
 }
