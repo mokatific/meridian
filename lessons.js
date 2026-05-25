@@ -691,11 +691,13 @@ export function getLessonsForPrompt(opts = {}) {
   const data = load();
   if (data.lessons.length === 0) return null;
 
-  // Smaller caps for automated cycles — they don't need the full lesson history
+  // Smaller caps for automated cycles — they don't need the full lesson history.
+  // Tightened to reduce cost: auto cycles get the top ~6 most relevant lessons,
+  // interactive (GENERAL) keeps the richer set since the user is reading.
   const isAutoCycle = agentType === "SCREENER" || agentType === "MANAGER";
-  const PINNED_CAP = isAutoCycle ? 5 : 10;
-  const ROLE_CAP = isAutoCycle ? 6 : 15;
-  const RECENT_CAP = maxLessons ?? (isAutoCycle ? 10 : 35);
+  const PINNED_CAP = isAutoCycle ? 3 : 10;
+  const ROLE_CAP = isAutoCycle ? 4 : 15;
+  const RECENT_CAP = maxLessons ?? (isAutoCycle ? 6 : 35);
 
   const outcomePriority = {
     bad: 0,
