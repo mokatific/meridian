@@ -1,0 +1,67 @@
+# EditorConfig is awesome: https://EditorConfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Python — PEP 8
+[*.py]
+indent_size = 4
+max_line_length = 100
+
+# Svelte
+[*.svelte]
+indent_size = 2
+
+# TypeScript / JavaScript
+[*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}]
+indent_size = 2
+max_line_length = 100
+
+# JSON / JSONC
+[*.{json,jsonc}]
+indent_size = 2
+
+# YAML
+[*.{yaml,yml}]
+indent_size = 2
+
+# CSS / SCSS / LESS
+[*.{css,scss,less}]
+indent_size = 2
+
+# HTML
+[*.{html,htm}]
+indent_size = 2
+
+# Markdown / MDX — preserve trailing spaces (line breaks)
+[*.{md,mdx,markdown}]
+trim_trailing_whitespace = false
+indent_size = 2
+
+# Shell scripts
+[*.sh]
+indent_size = 2
+
+# TOML
+[*.toml]
+indent_size = 2
+
+# Go — gofmt uses hard tabs, no line length limit enforced by tooling
+[*.go]
+indent_style = tab
+indent_size = 4
+
+# Makefile — hard tabs required
+[{Makefile,*.mk}]
+indent_style = tab
+trim_trailing_whitespace = false
+
+# Batch files — Windows line endings
+[*.bat]
+end_of_line = crlf

@@ -1,0 +1,6 @@
+pre-commit:
+  parallel: true
+  jobs:
+    - name: prettier
+      glob: "*.{js,md,sh,json,yml,yaml}"
+      run: yarn prettier --write {staged_files}
