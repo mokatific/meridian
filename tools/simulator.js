@@ -220,8 +220,7 @@ export async function simulateLpPosition({
     const denom = poolTvlPerBin + myBinUsd;
     return denom > 0 ? myBinUsd / denom : 0;
   });
-  const tvlShareAvg =
-    weights.reduce((acc, w, i) => acc + w.weight * tvlShares[i], 0);
+  const tvlShareAvg = weights.reduce((acc, w, i) => acc + w.weight * tvlShares[i], 0);
 
   // Replay
   let feesUsd = 0;
@@ -257,7 +256,7 @@ export async function simulateLpPosition({
   const netPnL = feesUsd + il.ilUsd;
   const durationMs = candles[candles.length - 1].ts - candles[0].ts;
   const durationDays = Math.max(durationMs / 86_400_000, 5 / 1440);
-  const annualizedFeeApr = ((feesUsd / initialUsd) * (365 / durationDays)) * 100;
+  const annualizedFeeApr = (feesUsd / initialUsd) * (365 / durationDays) * 100;
 
   return {
     pool: pool_address,

@@ -79,6 +79,7 @@ discord-signals.json
 # Backup files
 # ============================================
 backup/
+*.backup
 
 # ============================================
 # Telegram
