@@ -16,10 +16,11 @@
     "dev": "DRY_RUN=true node index.js",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "yarn test:syntax",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "test:syntax": "find . -path ./node_modules -prune -o -name '*.js' -exec node --check {} \\;",
-    "test:screen": "node test/test-screening.js",
-    "test:agent": "DRY_RUN=true node test/test-agent.js",
+    "test:all": "yarn test:syntax && yarn test",
     "postinstall": "lefthook install && node scripts/patch-anchor.js"
   },
   "knip": {
@@ -46,9 +47,12 @@
     "openai": "^4.73.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^2.1.9",
     "lefthook": "^2.1.8",
+    "memfs": "^4.17.0",
     "prettier": "^3.8.3",
-    "prettier-plugin-sh": "^0.16.1"
+    "prettier-plugin-sh": "^0.16.1",
+    "vitest": "^2.1.9"
   },
   "prettier": {
     "plugins": [
