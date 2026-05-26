@@ -64,6 +64,7 @@ module.exports = {
       log_date_format: "DD-MM-YYYY HH:mm:ss Z",
       env: {
         ...dotenv,
+        TZ: "Asia/Jakarta",
         NODE_ENV: "production",
       },
     },

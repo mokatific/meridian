@@ -21,15 +21,16 @@ export function log(category, message) {
   if (LEVELS[level] < currentLevel) return;
 
   const timestamp = new Date().toISOString();
-  const line = `[${timestamp}] [${category.toUpperCase()}] ${message}`;
+  const consoleLine = `[${category.toUpperCase()}] ${message}`;
+  const fileLine = `[${timestamp}] [${category.toUpperCase()}] ${message}`;
 
-  // Console output
-  console.log(line);
+  // Console output (PM2 adds its own timestamp)
+  console.log(consoleLine);
 
   // File output (daily rotation)
   const dateStr = timestamp.split("T")[0];
   const logFile = path.join(LOG_DIR, `agent-${dateStr}.log`);
-  fs.appendFileSync(logFile, line + "\n");
+  fs.appendFileSync(logFile, fileLine + "\n");
 }
 
 /**
