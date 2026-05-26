@@ -21,6 +21,25 @@ let _polling = false;
 let _liveMessageDepth = 0;
 let _warnedMissingChatId = false;
 let _warnedMissingAllowedUsers = false;
+const _messageCache = new Map();
+
+function normalizeText(value) {
+  return String(value ?? "").slice(0, 4096);
+}
+
+function normalizeKeyboard(inlineKeyboard) {
+  return inlineKeyboard ? JSON.stringify(inlineKeyboard) : null;
+}
+
+function cacheMessage(messageId, text, keyboardKey) {
+  if (!messageId) return;
+  _messageCache.set(String(messageId), { text, keyboardKey });
+}
+
+function getCachedMessage(messageId) {
+  if (!messageId) return null;
+  return _messageCache.get(String(messageId)) || null;
+}
 
 // ─── chatId persistence ──────────────────────────────────────────
 function loadChatId() {
@@ -101,6 +120,9 @@ async function postTelegram(method, body, retries = 3) {
       });
       if (!res.ok) {
         const err = await res.text();
+        if (res.status === 400 && err.includes("message is not modified")) {
+          return { ok: true, skipped: true };
+        }
         if (res.status === 429) {
           // Rate limited - wait and retry
           const retryAfter = parseInt(err.match(/retry_after":(\d+)/)?.[1] || "5");
@@ -146,37 +168,69 @@ async function postTelegramRaw(method, body) {
 
 export async function sendMessage(text) {
   if (!TOKEN || !chatId) return;
-  return postTelegram("sendMessage", { text: String(text).slice(0, 4096) });
+  const normalizedText = normalizeText(text);
+  const sent = await postTelegram("sendMessage", { text: normalizedText });
+  const messageId = sent?.result?.message_id;
+  if (messageId) cacheMessage(messageId, normalizedText, null);
+  return sent;
 }
 
 export async function sendMessageWithButtons(text, inlineKeyboard) {
   if (!TOKEN || !chatId) return;
-  return postTelegram("sendMessage", {
-    text: String(text).slice(0, 4096),
+  const normalizedText = normalizeText(text);
+  const keyboardKey = normalizeKeyboard(inlineKeyboard);
+  const sent = await postTelegram("sendMessage", {
+    text: normalizedText,
     reply_markup: { inline_keyboard: inlineKeyboard },
   });
+  const messageId = sent?.result?.message_id;
+  if (messageId) cacheMessage(messageId, normalizedText, keyboardKey);
+  return sent;
 }
 
 export async function sendHTML(html) {
   if (!TOKEN || !chatId) return;
-  return postTelegram("sendMessage", { text: html.slice(0, 4096), parse_mode: "HTML" });
+  const normalizedText = normalizeText(html);
+  const sent = await postTelegram("sendMessage", { text: normalizedText, parse_mode: "HTML" });
+  const messageId = sent?.result?.message_id;
+  if (messageId) cacheMessage(messageId, normalizedText, null);
+  return sent;
 }
 
 export async function editMessage(text, messageId) {
   if (!TOKEN || !chatId || !messageId) return null;
-  return postTelegram("editMessageText", {
+  const normalizedText = normalizeText(text);
+  const cached = getCachedMessage(messageId);
+  if (cached && cached.text === normalizedText) {
+    return { ok: true, skipped: true };
+  }
+  const res = await postTelegram("editMessageText", {
     message_id: messageId,
-    text: String(text).slice(0, 4096),
+    text: normalizedText,
   });
+  if (res?.ok !== false) {
+    cacheMessage(messageId, normalizedText, cached?.keyboardKey ?? null);
+  }
+  return res;
 }
 
 export async function editMessageWithButtons(text, messageId, inlineKeyboard) {
   if (!TOKEN || !chatId || !messageId) return null;
-  return postTelegram("editMessageText", {
+  const normalizedText = normalizeText(text);
+  const keyboardKey = normalizeKeyboard(inlineKeyboard);
+  const cached = getCachedMessage(messageId);
+  if (cached && cached.text === normalizedText && cached.keyboardKey === keyboardKey) {
+    return { ok: true, skipped: true };
+  }
+  const res = await postTelegram("editMessageText", {
     message_id: messageId,
-    text: String(text).slice(0, 4096),
+    text: normalizedText,
     reply_markup: { inline_keyboard: inlineKeyboard },
   });
+  if (res?.ok !== false) {
+    cacheMessage(messageId, normalizedText, keyboardKey);
+  }
+  return res;
 }
 
 export async function answerCallbackQuery(callbackQueryId, text = "") {
