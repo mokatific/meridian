@@ -346,7 +346,7 @@ function isSystemRoleError(error) {
   return /invalid message role:\s*system/i.test(message);
 }
 
-function isToolChoiceRequiredError(error) {
+function isToolChoiceError(error) {
   const message = String(error?.message || error?.error?.message || error || "");
   return /tool_choice/i.test(message) || /tool_choice/i.test(error?.error?.message || "");
 }
@@ -420,6 +420,7 @@ export async function agentLoop(
   let noToolRetryCount = 0;
 
   let emptyStreak = 0;
+  let omitToolChoice = false;
   for (let step = 0; step < maxSteps; step++) {
     // Check abort signal at the top of each step
     if (signal?.aborted) {
@@ -449,14 +450,15 @@ export async function agentLoop(
 
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
-          response = await usedClient.chat.completions.create({
+          const params = {
             model: usedModel,
             messages,
             tools: getToolsForRole(agentType, goal),
-            tool_choice: toolChoice,
             temperature: config.llm.temperature,
             max_tokens: maxOutputTokens ?? config.llm.maxTokens,
-          });
+          };
+          if (!omitToolChoice) params.tool_choice = toolChoice;
+          response = await usedClient.chat.completions.create(params);
         } catch (error) {
           if (providerMode === "system" && isSystemRoleError(error)) {
             providerMode = "user_embedded";
@@ -468,9 +470,20 @@ export async function agentLoop(
             attempt -= 1;
             continue;
           }
-          if (toolChoice === "required" && isToolChoiceRequiredError(error)) {
-            toolChoice = "auto";
-            log("agent", "Provider rejected tool_choice=required — retrying with tool_choice=auto");
+          if (!omitToolChoice && isToolChoiceError(error)) {
+            if (toolChoice === "required") {
+              toolChoice = "auto";
+              log(
+                "agent",
+                "Provider rejected tool_choice=required — retrying with tool_choice=auto",
+              );
+            } else {
+              omitToolChoice = true;
+              log(
+                "agent",
+                "Provider rejected tool_choice — omitting it for the remainder of this run (DeepSeek thinking mode?)",
+              );
+            }
             attempt -= 1;
             continue;
           }
