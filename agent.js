@@ -522,8 +522,8 @@ export async function agentLoop(
           }
           throw error;
         }
-        if (response.choices?.length) break;
-        const errCode = response.error?.code || response.error?.status;
+        if (response?.choices?.length) break;
+        const errCode = response?.error?.code || response?.error?.status;
         if (errCode === 429) {
           const backoff = Math.min(30000, (attempt + 1) * 10000);
           log(
