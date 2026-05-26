@@ -415,6 +415,7 @@ export async function agentLoop(
   // These lock after first attempt regardless of success — retrying them is always wrong
   const NO_RETRY_TOOLS = new Set(["deploy_position"]);
   const firedOnce = new Set();
+  const firstAttemptReason = new Map();
   const mustUseRealTool = shouldRequireRealToolUse(goal, agentType, interactive);
   let sawToolCall = false;
   let noToolRetryCount = 0;
@@ -737,12 +738,17 @@ export async function agentLoop(
           // Block once-per-session tools from firing a second time
           if (ONCE_PER_SESSION.has(functionName) && firedOnce.has(functionName)) {
             log("agent", `Blocked duplicate ${functionName} call — already executed this session`);
+            const priorReason = firstAttemptReason.get(functionName);
+            const reasonSuffix = priorReason ? ` Original failure reason: ${priorReason}.` : "";
+            const guardReason =
+              `${functionName} already attempted this session — do not retry. ` +
+              `If it failed, report the error and stop.${reasonSuffix}`;
             await onToolFinish?.({
               name: functionName,
               args: functionArgs,
               result: {
                 blocked: true,
-                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
+                reason: guardReason,
               },
               success: false,
               step,
@@ -752,7 +758,7 @@ export async function agentLoop(
               tool_call_id: toolCall.id,
               content: JSON.stringify({
                 blocked: true,
-                reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.`,
+                reason: guardReason,
               }),
             };
           }
@@ -766,6 +772,11 @@ export async function agentLoop(
             success: result?.success !== false && !result?.error && !result?.blocked,
             step,
           });
+
+          if (ONCE_PER_SESSION.has(functionName) && !firstAttemptReason.has(functionName)) {
+            const attemptReason = result?.error || result?.reason;
+            if (attemptReason) firstAttemptReason.set(functionName, attemptReason);
+          }
 
           // Lock deploy_position after first attempt regardless of outcome — retrying is never right
           // For close/swap: only lock on success so genuine failures can be retried
