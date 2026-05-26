@@ -26,6 +26,9 @@ const DEFAULT_TTL_MS = 60_000; // 60s for account data
 const SHORT_TTL_MS = 30_000; // 30s for balance/program accounts
 const MAX_CACHE_SIZE = 500; // max entries before LRU eviction
 const FAILOVER_COOLDOWN_MS = 60_000; // stay on fallback for 60s before retrying primary
+const RPC_MAX_RETRIES = Number(process.env.RPC_MAX_RETRIES || 3);
+const RPC_RETRY_BASE_MS = Number(process.env.RPC_RETRY_BASE_MS || 1000);
+const RPC_RETRY_CAP_MS = Number(process.env.RPC_RETRY_CAP_MS || 30000);
 
 class LRUCache {
   constructor(maxSize = MAX_CACHE_SIZE) {
@@ -112,6 +115,34 @@ function isRetryableError(err) {
   );
 }
 
+function isRateLimitError(err) {
+  const msg = err?.message || "";
+  return msg.includes("429") || msg.includes("Too Many Requests");
+}
+
+function getRetryAfterMs(err) {
+  const header =
+    err?.response?.headers?.get?.("retry-after") ||
+    err?.cause?.response?.headers?.get?.("retry-after") ||
+    err?.headers?.get?.("retry-after");
+  const parsed = Number(header);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed * 1000;
+  const match = String(err?.message || "").match(/retry-?after[:\s]+(\d+)/i);
+  if (match) {
+    const seconds = Number(match[1]);
+    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+  }
+  return null;
+}
+
+function computeBackoffMs(err, attempt) {
+  const base = Math.min(RPC_RETRY_CAP_MS, RPC_RETRY_BASE_MS * Math.pow(2, attempt));
+  const retryAfter = isRateLimitError(err) ? getRetryAfterMs(err) : null;
+  const jitter = 250 + Math.floor(Math.random() * 250);
+  const delay = retryAfter ? Math.max(retryAfter, base) : base;
+  return Math.min(delay + jitter, RPC_RETRY_CAP_MS);
+}
+
 /**
  * Create a cached Connection with automatic failover.
  * Primary: RPC_URL (Alchemy), Fallback: RPC_URL_FALLBACK (Helius)
@@ -143,14 +174,33 @@ export function createCachedConnection(rpcUrl, commitmentOrConfig = "confirmed")
     );
   }
 
+  async function withRetries(fn, label) {
+    let lastErr = null;
+    for (let attempt = 0; attempt <= RPC_MAX_RETRIES; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        if (!isRetryableError(err) || attempt === RPC_MAX_RETRIES) throw err;
+        const delay = computeBackoffMs(err, attempt);
+        log(
+          "rpc-retry",
+          `${label} RPC retry in ${Math.round(delay)}ms (attempt ${attempt + 1}/${RPC_MAX_RETRIES + 1})`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+    throw lastErr;
+  }
+
   async function withFailover(fn) {
     try {
-      return await fn(getActiveConnection());
+      return await withRetries(() => fn(getActiveConnection()), "primary");
     } catch (err) {
       if (isRetryableError(err) && fallbackConn) {
         switchToFallback(err);
         // Retry on fallback
-        return await fn(fallbackConn);
+        return await withRetries(() => fn(fallbackConn), "fallback");
       }
       throw err;
     }
