@@ -388,6 +388,7 @@ const toolMap = {
       timeframe: ["screening", "timeframe"],
       category: ["screening", "category"],
       minTokenFeesSol: ["screening", "minTokenFeesSol"],
+      maxVolatility: ["screening", "maxVolatility"],
       useDiscordSignals: ["screening", "useDiscordSignals"],
       discordSignalMode: ["screening", "discordSignalMode"],
       avoidPvpSymbols: ["screening", "avoidPvpSymbols"],

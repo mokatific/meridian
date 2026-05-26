@@ -373,13 +373,12 @@ export function evolveThresholds(perfData, config) {
     }
   }
 
-  // ── 2. minFeeTvlRatio ─────────────────────────────────────────
+  // ── 2. minFeeActiveTvlRatio ─────────────────────────────────────────
   // Raise the floor if low-fee pools consistently underperform.
   {
     const winnerFees = winners.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
     const loserFees = losers.map((p) => p.fee_tvl_ratio).filter(isFiniteNum);
-    const current =
-      config.screening.minFeeActiveTvlRatio ?? config.screening.minFeeTvlRatio ?? 0.06;
+    const current = config.screening.minFeeActiveTvlRatio ?? 0.06;
 
     if (winnerFees.length >= 2) {
       // Minimum fee/TVL among winners — we know pools below this don't work for us
@@ -459,7 +458,7 @@ export function evolveThresholds(perfData, config) {
   // Apply to live config object immediately
   const s = config.screening;
   if (changes.maxVolatility != null) s.maxVolatility = changes.maxVolatility;
-  if (changes.minFeeTvlRatio != null) s.minFeeTvlRatio = changes.minFeeTvlRatio;
+  if (changes.minFeeActiveTvlRatio != null) s.minFeeActiveTvlRatio = changes.minFeeActiveTvlRatio;
   if (changes.minOrganic != null) s.minOrganic = changes.minOrganic;
 
   // Log a lesson summarizing the evolution

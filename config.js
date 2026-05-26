@@ -86,6 +86,7 @@ export const config = {
     timeframe: u.timeframe ?? "5m",
     category: u.category ?? "trending",
     minTokenFeesSol: u.minTokenFeesSol ?? 30, // global fees paid (priority+jito tips). below = bundled/scam
+    maxVolatility: u.maxVolatility ?? null, // max pool volatility to screen (null = no cap)
     useDiscordSignals: u.useDiscordSignals ?? false,
     discordSignalMode: u.discordSignalMode ?? "merge", // merge | only
     avoidPvpSymbols: u.avoidPvpSymbols ?? true, // avoid exact-symbol rivals with real active pools
@@ -273,6 +274,7 @@ export function reloadScreeningThresholds() {
     const s = config.screening;
     if (fresh.minFeeActiveTvlRatio != null) s.minFeeActiveTvlRatio = fresh.minFeeActiveTvlRatio;
     if (fresh.minTokenFeesSol != null) s.minTokenFeesSol = fresh.minTokenFeesSol;
+    if (fresh.maxVolatility !== undefined) s.maxVolatility = fresh.maxVolatility;
     if (fresh.maxTop10Pct != null) s.maxTop10Pct = fresh.maxTop10Pct;
     if (fresh.useDiscordSignals !== undefined) s.useDiscordSignals = fresh.useDiscordSignals;
     if (fresh.discordSignalMode != null) s.discordSignalMode = fresh.discordSignalMode;
