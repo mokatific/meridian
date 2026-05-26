@@ -1,9 +1,6 @@
 {
   "preset": "custom",
-  "rpcUrl": "https://pump.helius-rpc.com",
-  "llmBaseUrl": "",
-  "llmApiKey": "",
-  "llmModel": "minimax/minimax-m2.7",
+  "rpcUrl": "https://your-rpc-endpoint.example.com",
   "dryRun": true,
 
   "initialVirtualBalance": 0.65,
@@ -49,6 +46,7 @@
   "blockedLaunchpads": [],
   "minTokenAgeHours": null,
   "maxTokenAgeHours": null,
+  "maxVolatility": 8,
   "athFilterPct": null,
 
   "minClaimAmount": 5,
@@ -57,6 +55,11 @@
   "outOfRangeWaitMinutes": 30,
   "oorCooldownTriggerCount": 3,
   "oorCooldownHours": 12,
+  "repeatDeployCooldownEnabled": true,
+  "repeatDeployCooldownTriggerCount": 3,
+  "repeatDeployCooldownHours": 12,
+  "repeatDeployCooldownScope": "token",
+  "repeatDeployCooldownMinFeeEarnedPct": 0,
   "minVolumeToRebalance": 1000,
   "stopLossPct": -50,
   "takeProfitPct": 5,
@@ -75,9 +78,9 @@
   "temperature": 0.373,
   "maxTokens": 4096,
   "maxSteps": 20,
-  "managementModel": "minimax/minimax-m2.5",
-  "screeningModel": "minimax/minimax-m2.5",
-  "generalModel": "minimax/minimax-m2.7",
+  "managementModel": "openrouter/healer-alpha",
+  "screeningModel": "openrouter/hunter-alpha",
+  "generalModel": "openrouter/healer-alpha",
 
   "darwinEnabled": true,
   "darwinWindowDays": 60,
@@ -88,10 +91,19 @@
   "darwinCeiling": 2.5,
   "darwinMinSamples": 10,
 
+  "llmProvider": "openrouter",
+  "llmBaseUrl": "",
+  "llmApiKey": "",
+  "llmModel": "",
+
   "agentId": "",
   "publicApiKey": "",
   "agentMeridianApiUrl": "https://api.agentmeridian.xyz/api",
   "lpAgentRelayEnabled": false,
+  "hiveMindUrl": "https://api.agentmeridian.xyz",
+  "hiveMindApiKey": "",
+  "hiveMindPullMode": "auto",
+
   "chartIndicators": {
     "enabled": false,
     "entryPreset": "supertrend_break",
@@ -103,8 +115,6 @@
     "rsiOverbought": 80,
     "requireAllIntervals": false
   },
-  "telegramChatId": "",
-  "hiveMindUrl": "",
-  "hiveMindApiKey": "",
-  "hiveMindPullMode": "auto"
+
+  "telegramChatId": ""
 }

@@ -78,33 +78,173 @@ Sets defined in `agent.js:6-7`. If you add a tool, also add it to the relevant s
 - Persists to `user-config.json`
 - Restarts cron jobs if intervals changed
 
-**Valid config keys and their sections:**
+A redacted template lives in `user-config.example.json` — copy it to `user-config.json` and edit. The file must be strict JSON (no comments); the per-key reference below replaces the in-file documentation.
 
-| Key                                             | Section    | Default                 |
-| ----------------------------------------------- | ---------- | ----------------------- |
-| minFeeActiveTvlRatio                            | screening  | 0.05                    |
-| minTvl / maxTvl                                 | screening  | 10k / 150k              |
-| minVolume                                       | screening  | 500                     |
-| minOrganic                                      | screening  | 60                      |
-| minHolders                                      | screening  | 500                     |
-| minMcap / maxMcap                               | screening  | 150k / 10M              |
-| minBinStep / maxBinStep                         | screening  | 80 / 125                |
-| timeframe                                       | screening  | "5m"                    |
-| category                                        | screening  | "trending"              |
-| minTokenFeesSol                                 | screening  | 30                      |
-| maxBundlersPct                                  | screening  | 30                      |
-| maxTop10Pct                                     | screening  | 60                      |
-| blockedLaunchpads                               | screening  | []                      |
-| deployAmountSol                                 | management | 0.5                     |
-| maxDeployAmount                                 | risk       | 50                      |
-| maxPositions                                    | risk       | 3                       |
-| gasReserve                                      | management | 0.2                     |
-| positionSizePct                                 | management | 0.35                    |
-| minSolToOpen                                    | management | 0.55                    |
-| outOfRangeWaitMinutes                           | management | 30                      |
-| managementIntervalMin                           | schedule   | 10                      |
-| screeningIntervalMin                            | schedule   | 30                      |
-| managementModel / screeningModel / generalModel | llm        | openrouter/healer-alpha |
+### Meta
+
+| Key    | Default                  | Description                                                                       |
+| ------ | ------------------------ | --------------------------------------------------------------------------------- |
+| preset | `"custom"`               | Free-form label shown in `/config`; no runtime behavior.                          |
+| rpcUrl | env `RPC_URL`            | Solana RPC endpoint. Written to `process.env.RPC_URL` if env is unset.            |
+| dryRun | env `DRY_RUN` or `false` | `true` blocks all on-chain sends (deploy / close / claim / swap). Written to env. |
+
+### Dry-Run Simulator (only used when `dryRun=true`)
+
+| Key                   | Default | Description                                            |
+| --------------------- | ------- | ------------------------------------------------------ |
+| initialVirtualBalance | `0.65`  | SOL — starting wallet balance for the virtual ledger.  |
+| slippagePct           | `2`     | % slippage applied to simulated auto-swap.             |
+| gasFeePerDeploy       | `0.005` | SOL deducted from virtual wallet per simulated deploy. |
+| gasFeePerClose        | `0.002` | SOL deducted from virtual wallet per simulated close.  |
+
+### Capital / Position Sizing
+
+| Key             | Default | Section    | Description                                                                  |
+| --------------- | ------- | ---------- | ---------------------------------------------------------------------------- |
+| deployAmountSol | `0.5`   | management | Floor of `computeDeployAmount()`; per-deploy minimum.                        |
+| maxPositions    | `3`     | risk       | Hard cap on simultaneous open positions (enforced by executor safety check). |
+| minSolToOpen    | `0.55`  | management | Refuse to deploy if wallet SOL falls below this.                             |
+| maxDeployAmount | `50`    | risk       | Ceiling of `computeDeployAmount()`; per-deploy maximum.                      |
+| gasReserve      | `0.2`   | management | SOL kept aside for gas; subtracted before sizing.                            |
+| positionSizePct | `0.35`  | management | Fraction of `(wallet − gasReserve)` used per deploy.                         |
+
+### Strategy / Bin Range
+
+| Key              | Default     | Description                                                    |
+| ---------------- | ----------- | -------------------------------------------------------------- |
+| strategy         | `"bid_ask"` | DLMM liquidity strategy: `bid_ask` \| `spot` \| `curve`.       |
+| minBinsBelow     | `35`        | SCREENER min bin range; clamped to `MIN_SAFE_BINS_BELOW` (35). |
+| maxBinsBelow     | `69`        | SCREENER max bin range; scales with volatility.                |
+| defaultBinsBelow | `69`        | Fallback when volatility is unknown.                           |
+
+### Screening Filters
+
+| Key                            | Default      | Description                                                                                   |
+| ------------------------------ | ------------ | --------------------------------------------------------------------------------------------- |
+| timeframe                      | `"5m"`       | Candidate-feed timeframe: `5m` \| `1h` \| `4h` \| `24h`.                                      |
+| category                       | `"trending"` | Candidate-feed category from datapi.                                                          |
+| excludeHighSupplyConcentration | `true`       | Reject pools where top holders dominate supply.                                               |
+| minTvl / maxTvl                | `10k / 150k` | USD bounds on pool TVL (deep TVL = thin fees).                                                |
+| minVolume                      | `500`        | USD — min recent volume in chosen timeframe.                                                  |
+| minOrganic                     | `60`         | % — min organic volume score (overall).                                                       |
+| minQuoteOrganic                | `60`         | % — min organic volume score (quote token).                                                   |
+| minHolders                     | `500`        | Min unique holder count.                                                                      |
+| minMcap / maxMcap              | `150k / 10M` | USD market-cap bounds.                                                                        |
+| minBinStep / maxBinStep        | `80 / 125`   | DLMM bin-step bounds (bps × 1e4).                                                             |
+| minFeeActiveTvlRatio           | `0.05`       | Min fee/activeTVL ratio. `lessons.evolveThresholds` tunes this.                               |
+| minTokenFeesSol                | `30`         | Min global priority+jito tip fees paid (low = bundled/scam).                                  |
+| useDiscordSignals              | `false`      | Ingest signals from `discord-listener/`.                                                      |
+| discordSignalMode              | `"merge"`    | `merge` \| `only` — how Discord pools combine with datapi feed.                               |
+| avoidPvpSymbols                | `true`       | Deprioritize tokens whose symbol clashes with a live competing pool.                          |
+| blockPvpSymbols                | `false`      | Hard-filter PVP rivals before the LLM ever sees them.                                         |
+| maxBundlePct                   | `30`         | Max % supply held by detected bundle wallets (OKX advanced-info).                             |
+| maxBotHoldersPct               | `30`         | Max % bot-holder addresses (Jupiter audit `botHoldersPercentage`).                            |
+| maxTop10Pct                    | `60`         | Max % held by top-10 wallets.                                                                 |
+| allowedLaunchpads              | `[]`         | Allow-list of launchpads; `[]` = no allow-list.                                               |
+| blockedLaunchpads              | `[]`         | Deny-list, e.g. `["letsbonk.fun", "pump.fun"]`.                                               |
+| minTokenAgeHours               | `null`       | `null` = no minimum.                                                                          |
+| maxTokenAgeHours               | `null`       | `null` = no maximum.                                                                          |
+| maxVolatility                  | `15`         | Max volatility score; > this is skipped. Note: `evolveThresholds` doesn't actually update it. |
+| athFilterPct                   | `null`       | E.g. `-20` = only deploy if price ≥ 20% below ATH; `null` = off.                              |
+
+### Position Management
+
+| Key                                 | Default   | Description                                                          |
+| ----------------------------------- | --------- | -------------------------------------------------------------------- |
+| minClaimAmount                      | `5`       | USD — claim fees once accrued reaches this.                          |
+| autoSwapAfterClaim                  | `false`   | Auto-swap claimed base tokens back to SOL.                           |
+| outOfRangeBinsToClose               | `10`      | Close when price drifts this many bins past the range edge.          |
+| outOfRangeWaitMinutes               | `30`      | Grace period before OOR triggers close.                              |
+| oorCooldownTriggerCount             | `3`       | # of OOR-closes within window before cooldown engages.               |
+| oorCooldownHours                    | `12`      | Hours to blacklist the pool after repeated OOR.                      |
+| repeatDeployCooldownEnabled         | `true`    | Throttle deploys to the same pool/token.                             |
+| repeatDeployCooldownTriggerCount    | `3`       | # of recent deploys before cooldown engages.                         |
+| repeatDeployCooldownHours           | `12`      | Cooldown duration.                                                   |
+| repeatDeployCooldownScope           | `"token"` | `pool` \| `token` \| `both`.                                         |
+| repeatDeployCooldownMinFeeEarnedPct | `0`       | Skip cooldown if the last position earned ≥ this fee %.              |
+| minVolumeToRebalance                | `1000`    | USD — refuse rebalance if 24h volume below this.                     |
+| stopLossPct                         | `-50`     | Close when unrealized PnL % falls below this.                        |
+| takeProfitPct                       | `5`       | Close when fee-derived TP triggers.                                  |
+| minFeePerTvl24h                     | `7`       | Close stale positions earning < this fee/TVL % per 24h.              |
+| minAgeBeforeYieldCheck              | `60`      | Minutes — give a position time to earn before yield-triggered close. |
+| trailingTakeProfit                  | `true`    | Activate trailing TP after position is in profit.                    |
+| trailingTriggerPct                  | `3`       | PnL % at which trailing arms.                                        |
+| trailingDropPct                     | `1.5`     | Close when PnL drops this % from its peak.                           |
+| pnlSanityMaxDiffPct                 | `5`       | Ignore PnL ticks whose self-derived check diverges by > this.        |
+| solMode                             | `false`   | Report PnL/positions in SOL instead of USD.                          |
+
+### Scheduling (cron intervals, minutes)
+
+| Key                    | Default | Description                                                 |
+| ---------------------- | ------- | ----------------------------------------------------------- |
+| managementIntervalMin  | `10`    | MANAGER cycle: list positions, decide claim / close / hold. |
+| screeningIntervalMin   | `30`    | SCREENER cycle: pull candidates, decide whether to deploy.  |
+| healthCheckIntervalMin | `60`    | Hourly health-check chat (set to `120` etc. to slow down).  |
+
+### LLM
+
+| Key             | Default                   | Description                                                                |
+| --------------- | ------------------------- | -------------------------------------------------------------------------- |
+| temperature     | `0.373`                   | Sampling temperature.                                                      |
+| maxTokens       | `4096`                    | Max completion tokens; must be ≥ 2048 (free models often fail below).      |
+| maxSteps        | `20`                      | ReAct loop safety cap (steps per goal).                                    |
+| managementModel | `openrouter/healer-alpha` | Model used for MANAGER cycles. Falls back to env `LLM_MODEL`.              |
+| screeningModel  | `openrouter/hunter-alpha` | Model used for SCREENER cycles. Falls back to env `LLM_MODEL`.             |
+| generalModel    | `openrouter/healer-alpha` | Model used for `/chat`, REPL, ad-hoc goals. Falls back to env `LLM_MODEL`. |
+
+### Darwinian Signal-Weight Learning
+
+| Key               | Default | Description                                               |
+| ----------------- | ------- | --------------------------------------------------------- |
+| darwinEnabled     | `true`  | Master toggle for the signal-weight learner.              |
+| darwinWindowDays  | `60`    | Rolling window of closed positions used to score signals. |
+| darwinRecalcEvery | `5`     | Recalc weights every N closes.                            |
+| darwinBoost       | `1.05`  | Multiplicative boost applied to winning signals.          |
+| darwinDecay       | `0.95`  | Multiplicative decay applied to losing signals.           |
+| darwinFloor       | `0.3`   | Min signal weight (clamp).                                |
+| darwinCeiling     | `2.5`   | Max signal weight (clamp).                                |
+| darwinMinSamples  | `10`    | Min closes before a signal earns a non-neutral weight.    |
+
+### LLM Endpoint Override (optional — usually set via env)
+
+| Key         | Default | Description                                                                           |
+| ----------- | ------- | ------------------------------------------------------------------------------------- |
+| llmProvider | `""`    | Free-form provider label (informational; no behavior).                                |
+| llmBaseUrl  | `""`    | Override `LLM_BASE_URL` (LM Studio, SwiftRouter, …). Written to env if unset.         |
+| llmApiKey   | `""`    | Override `LLM_API_KEY` (kept out of `.env` for portability). Written to env if unset. |
+| llmModel    | `""`    | Override default model when per-role models are unset. Written to env if unset.       |
+
+### External Services
+
+| Key                 | Default                             | Description                                                              |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------------------ |
+| agentId             | `""`                                | Agent Meridian agent id (HiveMind identity).                             |
+| publicApiKey        | `""`                                | Agent Meridian public API key. Written to `PUBLIC_API_KEY` env if unset. |
+| agentMeridianApiUrl | `https://api.agentmeridian.xyz/api` | Agent Meridian relay base URL.                                           |
+| lpAgentRelayEnabled | `false`                             | Proxy LP queries through the Agent Meridian relay.                       |
+| hiveMindUrl         | `https://api.agentmeridian.xyz`     | HiveMind base URL.                                                       |
+| hiveMindApiKey      | `""` (built-in public key fallback) | HiveMind auth.                                                           |
+| hiveMindPullMode    | `"auto"`                            | `auto` \| `manual` — when shared lessons are pulled.                     |
+
+### Chart Indicators (`chartIndicators.*`)
+
+| Key                                 | Default              | Description                                                                          |
+| ----------------------------------- | -------------------- | ------------------------------------------------------------------------------------ |
+| chartIndicators.enabled             | `false`              | Master toggle.                                                                       |
+| chartIndicators.entryPreset         | `"supertrend_break"` | Entry preset: `supertrend_break` \| `rsi_oversold` \| `bb_squeeze` \| `fib_retrace`. |
+| chartIndicators.exitPreset          | `"supertrend_break"` | Exit preset (same set as entry).                                                     |
+| chartIndicators.rsiLength           | `2`                  | RSI period.                                                                          |
+| chartIndicators.intervals           | `["5_MINUTE"]`       | Candle intervals to evaluate (`5_MINUTE`, `15_MINUTE`).                              |
+| chartIndicators.candles             | `298`                | # of candles to pull per evaluation.                                                 |
+| chartIndicators.rsiOversold         | `30`                 | RSI oversold threshold.                                                              |
+| chartIndicators.rsiOverbought       | `80`                 | RSI overbought threshold.                                                            |
+| chartIndicators.requireAllIntervals | `false`              | `true` = signal must agree across every interval in `intervals`.                     |
+
+### Telegram
+
+| Key            | Default | Description                                                                        |
+| -------------- | ------- | ---------------------------------------------------------------------------------- |
+| telegramChatId | `""`    | Overrides `TELEGRAM_CHAT_ID` env; persisted here so `/start` can auto-bind a chat. |
 
 **`computeDeployAmount(walletSol)`** — scales position size with wallet balance (compounding). Formula: `clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)`.
 
