@@ -436,6 +436,7 @@ export async function agentLoop(
       const FALLBACK_MODEL = "deepseek-flash-combo";
       const providers = fallbackClient ? [primaryClient, fallbackClient] : [primaryClient];
       let response;
+      let lastError = null;
       let usedModel = activeModel;
       let usedClient = providers[0];
       let providerSwitched = false;
@@ -460,6 +461,7 @@ export async function agentLoop(
           if (!omitToolChoice) params.tool_choice = toolChoice;
           response = await usedClient.chat.completions.create(params);
         } catch (error) {
+          lastError = error;
           if (providerMode === "system" && isSystemRoleError(error)) {
             providerMode = "user_embedded";
             messages = buildMessages(systemPrompt, sessionHistory, goal, providerMode);
@@ -544,6 +546,11 @@ export async function agentLoop(
         } else {
           break;
         }
+      }
+
+      if (!response) {
+        if (lastError) throw lastError;
+        throw new Error("LLM call failed with no response and no error payload");
       }
 
       if (!response.choices?.length) {
