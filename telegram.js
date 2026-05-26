@@ -27,6 +27,109 @@ function normalizeText(value) {
   return String(value ?? "").slice(0, 4096);
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function stripTags(s) {
+  return String(s).replace(/<\/?[bi]>|<\/?code>|<\/?pre>/g, "");
+}
+
+function convertTables(text) {
+  const lines = text.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const next = lines[i + 1];
+    if (/^\s*\|.+\|\s*$/.test(line) && next != null && /^\s*\|[\s|:\-]+\|\s*$/.test(next)) {
+      const headerCells = line
+        .trim()
+        .replace(/^\||\|$/g, "")
+        .split("|")
+        .map((c) => c.trim());
+      out.push(headerCells.map((c) => `<b>${stripTags(c)}</b>`).join(" | "));
+      i += 2;
+      while (i < lines.length && /^\s*\|.+\|\s*$/.test(lines[i])) {
+        const cells = lines[i]
+          .trim()
+          .replace(/^\||\|$/g, "")
+          .split("|")
+          .map((c) => c.trim());
+        out.push(cells.join(" | "));
+        i++;
+      }
+      continue;
+    }
+    out.push(line);
+    i++;
+  }
+  return out.join("\n");
+}
+
+/**
+ * Convert common Markdown emitted by the LLM into Telegram-safe HTML.
+ * Telegram HTML supports <b>, <i>, <code>, <pre>, <a>, <blockquote> — not headings,
+ * tables, or horizontal rules. We map markdown to those primitives and drop the rest.
+ */
+function markdownToTelegramHtml(input) {
+  if (input == null) return "";
+  let text = String(input);
+
+  // Sentinel chars from the Unicode Private Use Area — won't appear in LLM output
+  // and won't be matched by \s or any markdown regex below.
+  const SO = "\uE000";
+  const SC = "\uE001";
+
+  const codeBlocks = [];
+  text = text.replace(/```[^\n]*\n?([\s\S]*?)```/g, (_, body) => {
+    codeBlocks.push(body.replace(/\n+$/, ""));
+    return `${SO}CB${codeBlocks.length - 1}${SC}`;
+  });
+
+  const inlineCodes = [];
+  text = text.replace(/`([^`\n]+)`/g, (_, body) => {
+    inlineCodes.push(body);
+    return `${SO}IC${inlineCodes.length - 1}${SC}`;
+  });
+
+  text = escapeHtml(text);
+
+  text = convertTables(text);
+
+  // Horizontal rule (---, ***, ___) → drop
+  text = text.replace(/^\s*([-*_])\1{2,}\s*$/gm, "");
+
+  // Bold
+  text = text.replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  text = text.replace(/__([^_\n]+)__/g, "<b>$1</b>");
+
+  // Headings → <b>
+  text = text.replace(/^#{1,6}\s+(.+?)\s*#*\s*$/gm, (_, m) => `<b>${stripTags(m)}</b>`);
+
+  // Bullets → •
+  text = text.replace(/^[ \t]*[-*]\s+/gm, "• ");
+
+  // Collapse runs of 3+ blank lines
+  text = text.replace(/\n{3,}/g, "\n\n");
+
+  // Restore code placeholders
+  text = text.replace(
+    new RegExp(`${SO}IC(\\d+)${SC}`, "g"),
+    (_, i) => `<code>${escapeHtml(inlineCodes[Number(i)])}</code>`,
+  );
+  text = text.replace(
+    new RegExp(`${SO}CB(\\d+)${SC}`, "g"),
+    (_, i) => `<pre>${escapeHtml(codeBlocks[Number(i)])}</pre>`,
+  );
+
+  return text.trim();
+}
+
+function toTelegramHtml(text) {
+  return markdownToTelegramHtml(text).slice(0, 4096);
+}
+
 function normalizeKeyboard(inlineKeyboard) {
   return inlineKeyboard ? JSON.stringify(inlineKeyboard) : null;
 }
@@ -168,23 +271,41 @@ async function postTelegramRaw(method, body) {
 
 export async function sendMessage(text) {
   if (!TOKEN || !chatId) return;
-  const normalizedText = normalizeText(text);
-  const sent = await postTelegram("sendMessage", { text: normalizedText });
+  const html = toTelegramHtml(text);
+  const sent = await postTelegram("sendMessage", { text: html, parse_mode: "HTML" });
+  if (!sent) {
+    const plain = normalizeText(text);
+    const fallback = await postTelegram("sendMessage", { text: plain });
+    const messageId = fallback?.result?.message_id;
+    if (messageId) cacheMessage(messageId, plain, null);
+    return fallback;
+  }
   const messageId = sent?.result?.message_id;
-  if (messageId) cacheMessage(messageId, normalizedText, null);
+  if (messageId) cacheMessage(messageId, html, null);
   return sent;
 }
 
 export async function sendMessageWithButtons(text, inlineKeyboard) {
   if (!TOKEN || !chatId) return;
-  const normalizedText = normalizeText(text);
+  const html = toTelegramHtml(text);
   const keyboardKey = normalizeKeyboard(inlineKeyboard);
   const sent = await postTelegram("sendMessage", {
-    text: normalizedText,
+    text: html,
+    parse_mode: "HTML",
     reply_markup: { inline_keyboard: inlineKeyboard },
   });
+  if (!sent) {
+    const plain = normalizeText(text);
+    const fallback = await postTelegram("sendMessage", {
+      text: plain,
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    });
+    const messageId = fallback?.result?.message_id;
+    if (messageId) cacheMessage(messageId, plain, keyboardKey);
+    return fallback;
+  }
   const messageId = sent?.result?.message_id;
-  if (messageId) cacheMessage(messageId, normalizedText, keyboardKey);
+  if (messageId) cacheMessage(messageId, html, keyboardKey);
   return sent;
 }
 
@@ -199,36 +320,61 @@ export async function sendHTML(html) {
 
 export async function editMessage(text, messageId) {
   if (!TOKEN || !chatId || !messageId) return null;
-  const normalizedText = normalizeText(text);
+  const html = toTelegramHtml(text);
   const cached = getCachedMessage(messageId);
-  if (cached && cached.text === normalizedText) {
+  if (cached && cached.text === html) {
     return { ok: true, skipped: true };
   }
   const res = await postTelegram("editMessageText", {
     message_id: messageId,
-    text: normalizedText,
+    text: html,
+    parse_mode: "HTML",
   });
+  if (!res) {
+    const plain = normalizeText(text);
+    const fallback = await postTelegram("editMessageText", {
+      message_id: messageId,
+      text: plain,
+    });
+    if (fallback?.ok !== false) {
+      cacheMessage(messageId, plain, cached?.keyboardKey ?? null);
+    }
+    return fallback;
+  }
   if (res?.ok !== false) {
-    cacheMessage(messageId, normalizedText, cached?.keyboardKey ?? null);
+    cacheMessage(messageId, html, cached?.keyboardKey ?? null);
   }
   return res;
 }
 
 export async function editMessageWithButtons(text, messageId, inlineKeyboard) {
   if (!TOKEN || !chatId || !messageId) return null;
-  const normalizedText = normalizeText(text);
+  const html = toTelegramHtml(text);
   const keyboardKey = normalizeKeyboard(inlineKeyboard);
   const cached = getCachedMessage(messageId);
-  if (cached && cached.text === normalizedText && cached.keyboardKey === keyboardKey) {
+  if (cached && cached.text === html && cached.keyboardKey === keyboardKey) {
     return { ok: true, skipped: true };
   }
   const res = await postTelegram("editMessageText", {
     message_id: messageId,
-    text: normalizedText,
+    text: html,
+    parse_mode: "HTML",
     reply_markup: { inline_keyboard: inlineKeyboard },
   });
+  if (!res) {
+    const plain = normalizeText(text);
+    const fallback = await postTelegram("editMessageText", {
+      message_id: messageId,
+      text: plain,
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    });
+    if (fallback?.ok !== false) {
+      cacheMessage(messageId, plain, keyboardKey);
+    }
+    return fallback;
+  }
   if (res?.ok !== false) {
-    cacheMessage(messageId, normalizedText, keyboardKey);
+    cacheMessage(messageId, html, keyboardKey);
   }
   return res;
 }
