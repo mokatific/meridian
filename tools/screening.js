@@ -654,6 +654,20 @@ export async function getTopCandidates({ limit = 10 } = {}) {
         );
         return false;
       }
+      const maxVolProximity =
+        config.screening.maxVolatilityProximityPct == null
+          ? null
+          : Number(config.screening.maxVolatilityProximityPct);
+      if (
+        Number.isFinite(maxVol) &&
+        Number.isFinite(maxVolProximity) &&
+        Number.isFinite(p.volatility) &&
+        p.volatility >= maxVol * maxVolProximity
+      ) {
+        const warning = `volatility ${p.volatility} near maxVolatility ${maxVol} (>= ${maxVolProximity * 100}% cap — caution only, not a hard skip)`;
+        p.volatility_recommendation = warning;
+        p.screening_note = warning;
+      }
       if (!isUsableVolatility(p.volatility)) {
         pushFilteredReason(filteredOut, p, `volatility ${p.volatility ?? "unknown"} is unusable`);
         return false;
@@ -926,6 +940,8 @@ function condensePool(p) {
     volatility: fix(p.volatility, 4),
     volatility_timeframe:
       p.volatility_timeframe || getVolatilityTimeframe(config.screening.timeframe),
+    volatility_recommendation: p.volatility_recommendation || null,
+    screening_note: p.screening_note || null,
 
     // Per-timeframe breakdown (populated when sourceTimeframe !== volatilityTimeframe)
     ...(p.volatility_timeframe && p.volatility_timeframe !== config.screening.timeframe

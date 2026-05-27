@@ -274,6 +274,18 @@ const maxMcap = await askNum("Max token market cap USD", p("maxMcap", 10_000_000
   min: 100_000,
 });
 
+const maxVolatility = await askNum(
+  "Max volatility score (set high if you want to avoid near-cap pools, 0 to disable cap)",
+  p("maxVolatility", 6),
+  { min: 0, max: 100 },
+);
+
+const maxVolatilityProximityPct = await askNum(
+  "Volatility caution threshold as a fraction of maxVolatility (0-1)",
+  p("maxVolatilityProximityPct", 0.8),
+  { min: 0.1, max: 1 },
+);
+
 // ─── Section 6: Exit Rules ────────────────────────────────────────────────────
 console.log("\n── Exit Rules ────────────────────────────────────────────────");
 
@@ -446,6 +458,8 @@ const userConfig = {
   minOrganic,
   minHolders,
   maxMcap,
+  maxVolatility,
+  maxVolatilityProximityPct,
   takeProfitFeePct,
   stopLossPct,
   outOfRangeWaitMinutes,
@@ -483,6 +497,7 @@ console.log(`
   Deploy:       ${deployAmountSol} SOL/position  ·  max ${maxPositions} positions
   Min balance:  ${minSolToOpen} SOL to open new position
   Timeframe:    ${timeframe}  ·  organic ≥ ${minOrganic}  ·  holders ≥ ${minHolders}
+  Volatility:   max ${maxVolatility}  ·  caution ≥ ${(maxVolatilityProximityPct * 100).toFixed(0)}% of cap
   Take profit:  fees ≥ ${takeProfitFeePct}%
   Stop loss:    ${stopLossPct}% price drop
   OOR close:    after ${outOfRangeWaitMinutes} min

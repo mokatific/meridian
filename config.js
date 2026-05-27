@@ -87,6 +87,7 @@ export const config = {
     category: u.category ?? "trending",
     minTokenFeesSol: u.minTokenFeesSol ?? 30, // global fees paid (priority+jito tips). below = bundled/scam
     maxVolatility: u.maxVolatility ?? null, // max pool volatility to screen (null = no cap)
+    maxVolatilityProximityPct: u.maxVolatilityProximityPct ?? 0.8, // advisory threshold: volatility >= maxVol * this is a near-cap caution signal (0.8 = 80% of cap)
     useDiscordSignals: u.useDiscordSignals ?? false,
     discordSignalMode: u.discordSignalMode ?? "merge", // merge | only
     avoidPvpSymbols: u.avoidPvpSymbols ?? true, // avoid exact-symbol rivals with real active pools
@@ -291,6 +292,8 @@ export function reloadScreeningThresholds() {
     if (fresh.minBinStep != null) s.minBinStep = fresh.minBinStep;
     if (fresh.maxBinStep != null) s.maxBinStep = fresh.maxBinStep;
     if (fresh.maxVolatility != null) s.maxVolatility = fresh.maxVolatility;
+    if (fresh.maxVolatilityProximityPct != null)
+      s.maxVolatilityProximityPct = fresh.maxVolatilityProximityPct;
     if (fresh.timeframe != null) s.timeframe = fresh.timeframe;
     if (fresh.category != null) s.category = fresh.category;
     if (fresh.minTokenAgeHours !== undefined) s.minTokenAgeHours = fresh.minTokenAgeHours;
