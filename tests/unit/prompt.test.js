@@ -104,17 +104,23 @@ describe("buildSystemPrompt", () => {
       expect(out).toContain("Timestamp: 2026-01-15T12:00:00.000Z");
     });
 
-    it("includes Performance section only when perfSummary has entries", () => {
+    it("always includes Performance section with appropriate fallback content", () => {
       const withPerf = buildSystemPrompt("GENERAL", portfolio, positions, null, null, {
         win_rate: 0.6,
       });
       expect(withPerf).toContain("Performance:");
+      expect(withPerf).toContain('"win_rate": 0.6');
 
       const noPerf = buildSystemPrompt("GENERAL", portfolio, positions, null, null, {});
-      expect(noPerf).not.toContain("Performance:");
+      expect(noPerf).toContain("Performance:");
+      expect(noPerf).toContain("Performance: {}");
 
       const emptyArr = buildSystemPrompt("GENERAL", portfolio, positions, null, null, []);
-      expect(emptyArr).not.toContain("Performance:");
+      expect(emptyArr).toContain("Performance:");
+      expect(emptyArr).toContain("Performance: []");
+
+      const nullPerf = buildSystemPrompt("GENERAL", portfolio, positions, null, null, null);
+      expect(nullPerf).toContain("Performance: No closed positions yet");
     });
 
     it("includes RECENT DECISIONS section only when decisionSummary provided", () => {
