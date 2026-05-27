@@ -52,12 +52,8 @@ Role: ${agentType || "GENERAL"}
 
 Portfolio: ${JSON.stringify(portfolio, null, 2)}
 Open Positions: ${JSON.stringify(positions, null, 2)}
-Memory: ${JSON.stringify(stateSummary, null, 2)}${
-    perfSummary &&
-    (Array.isArray(perfSummary) ? perfSummary.length > 0 : Object.keys(perfSummary).length > 0)
-      ? `\nPerformance: ${JSON.stringify(perfSummary, null, 2)}`
-      : ""
-  }
+Memory: ${JSON.stringify(stateSummary, null, 2)}
+Performance: ${perfSummary ? JSON.stringify(perfSummary, null, 2) : "No closed positions yet"}
 
 Config: ${JSON.stringify(
     {
