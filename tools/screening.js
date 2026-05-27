@@ -654,6 +654,7 @@ export async function getTopCandidates({ limit = 10 } = {}) {
         );
         return false;
       }
+      const maxVol = Number(config.screening.maxVolatility);
       const maxVolProximity =
         config.screening.maxVolatilityProximityPct == null
           ? null
