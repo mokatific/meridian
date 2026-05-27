@@ -153,6 +153,55 @@ function sanitizeUntrustedPromptText(text, maxLen = 500) {
   return cleaned ? JSON.stringify(cleaned) : null;
 }
 
+const STRATEGY_AUTO_THRESHOLDS = {
+  newTokenHours: 6,
+  highVolatility: 6.5,
+  lowVolatility: 2.5,
+  highBinStep: 125,
+  lowBinStep: 85,
+  strongFeeTvl: 7,
+};
+
+function pickStrategyForCandidate(pool, tokenInfo, activeStrategy) {
+  const fixed = activeStrategy?.lp_strategy;
+  if (fixed === "spot" || fixed === "curve" || fixed === "bid_ask") {
+    return { strategy: fixed, reason: `active strategy: ${activeStrategy.id}` };
+  }
+
+  const toNum = (value) => {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const ageHours = toNum(pool?.token_age_hours ?? tokenInfo?.token_age_hours);
+  const volatility = toNum(pool?.volatility);
+  const binStep = toNum(pool?.bin_step);
+  const feeTvl = toNum(pool?.fee_active_tvl_ratio ?? pool?.fee_tvl_ratio);
+
+  if (ageHours != null && ageHours <= STRATEGY_AUTO_THRESHOLDS.newTokenHours) {
+    return {
+      strategy: "spot",
+      reason: `new token age <= ${STRATEGY_AUTO_THRESHOLDS.newTokenHours}h`,
+    };
+  }
+
+  if (
+    (volatility != null && volatility >= STRATEGY_AUTO_THRESHOLDS.highVolatility) ||
+    (volatility == null && binStep != null && binStep >= STRATEGY_AUTO_THRESHOLDS.highBinStep)
+  ) {
+    return { strategy: "bid_ask", reason: "high volatility or bin step" };
+  }
+
+  const lowVol =
+    (volatility != null && volatility <= STRATEGY_AUTO_THRESHOLDS.lowVolatility) ||
+    (volatility == null && binStep != null && binStep <= STRATEGY_AUTO_THRESHOLDS.lowBinStep);
+  if (lowVol && feeTvl != null && feeTvl >= STRATEGY_AUTO_THRESHOLDS.strongFeeTvl) {
+    return { strategy: "curve", reason: "low volatility with strong fee/TVL" };
+  }
+
+  return { strategy: "bid_ask", reason: "default" };
+}
+
 function shouldUsePnlRecheck() {
   return !config.api.lpAgentRelayEnabled;
 }
@@ -389,7 +438,7 @@ export async function runManagementCycle({ silent = false } = {}) {
         ? `◎${p.unclaimed_fees_usd ?? "?"}`
         : `$${p.unclaimed_fees_usd ?? "?"}`;
       const statusLabel = act.action === "INSTRUCTION" ? "HOLD (instruction)" : act.action;
-      let line = `**${p.pair}** | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
+      let line = `**${p.pair}** | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | Strat: ${p.strategy ?? "?"} | ${inRange} | ${statusLabel}`;
       if (p.instruction) line += `\nNote: "${p.instruction}"`;
       if (act.action === "CLOSE" && act.rule === "exit") line += `\n⚡ Trailing TP: ${act.reason}`;
       if (act.action === "CLOSE" && act.rule && act.rule !== "exit")
@@ -433,6 +482,7 @@ export async function runManagementCycle({ silent = false } = {}) {
           return [
             `POSITION: ${p.pair} (${p.position})`,
             `  pool: ${p.pool}`,
+            `  strategy: ${p.strategy ?? "unknown"}`,
             `  action: ${act.action}${act.rule && act.rule !== "exit" ? ` — Rule ${act.rule}: ${act.reason}` : ""}${act.rule === "exit" ? ` — ⚡ Trailing TP: ${act.reason}` : ""}`,
             `  pnl_pct: ${p.pnl_pct}% | unclaimed_fees: ${cur}${p.unclaimed_fees_usd} | value: ${cur}${p.total_value_usd} | fee_per_tvl_24h: ${p.fee_per_tvl_24h ?? "?"}%`,
             `  bins: lower=${p.lower_bin} upper=${p.upper_bin} active=${p.active_bin} | oor_minutes: ${p.minutes_out_of_range ?? 0}`,
@@ -611,9 +661,15 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
     // Load active strategy
     const activeStrategy = getActiveStrategy();
+    const fixedLpStrategy =
+      activeStrategy?.lp_strategy === "spot" ||
+      activeStrategy?.lp_strategy === "curve" ||
+      activeStrategy?.lp_strategy === "bid_ask"
+        ? activeStrategy.lp_strategy
+        : null;
     const strategyBlock = activeStrategy
-      ? `ACTIVE STRATEGY: ${activeStrategy.name} — LP: ${activeStrategy.lp_strategy} | bins_above: ${activeStrategy.range?.bins_above ?? 0} (FIXED — never change) | deposit: ${activeStrategy.entry?.single_side === "sol" ? "SOL only (amount_y, amount_x=0)" : "dual-sided"} | best for: ${activeStrategy.best_for}`
-      : `No active strategy — use default bid_ask, bins_above: 0, SOL only.`;
+      ? `ACTIVE STRATEGY: ${activeStrategy.name} — LP: ${activeStrategy.lp_strategy} | bins_above: ${activeStrategy.range?.bins_above ?? 0} (FIXED — never change) | deposit: ${activeStrategy.entry?.single_side === "sol" ? "SOL only (amount_y, amount_x=0)" : "dual-sided"} | best for: ${activeStrategy.best_for} | lp_strategy ${fixedLpStrategy ? "fixed" : "auto"}`
+      : `No active strategy — LP shape will be auto-selected.`;
 
     // Fetch top candidates with 60s timeout to prevent hanging screening
     log("cron", "[DEBUG] Fetching top candidates...");
@@ -766,6 +822,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
     // Build compact candidate blocks
     const candidateBlocks = passing.map(({ pool, sw, n, ti, mem }, i) => {
+      const strategyHint = pickStrategyForCandidate(pool, ti, activeStrategy);
+      pool._strategy_hint = strategyHint;
       const botPct = ti?.audit?.bot_holders_pct ?? "?";
       const top10Pct = ti?.audit?.top_holders_pct ?? "?";
       const feesSol = ti?.global_fees_sol ?? "?";
@@ -805,6 +863,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
       const block = [
         `POOL: ${pool.name} (${pool.pool})`,
         `  metrics: bin_step=${pool.bin_step}, fee_pct=${pool.fee_pct}%, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.tvl ?? pool.active_tvl}, volatility_${pool.volatility_timeframe || "30m"}=${pool.volatility}, mcap=$${pool.mcap}, organic=${pool.organic_score}${pool.token_age_hours != null ? `, age=${pool.token_age_hours}h` : ""}`,
+        `  strategy_hint: ${strategyHint.strategy} (${strategyHint.reason})`,
         `  audit: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
         pvpLine,
         okxParts ? `  okx: ${okxParts}` : okxUnavailable ? `  okx: unavailable` : null,
@@ -869,6 +928,7 @@ STEPS:
 1. Decide if any candidate is actually worth deploying. One surviving candidate is not automatically good enough.
 2. Pick the best candidate based on narrative quality, smart wallets, and pool metrics.
 3. Call deploy_position (active_bin is pre-fetched above — no need to call get_active_bin).
+   Use the strategy_hint for deploy_position.strategy. Do not invent your own strategy.
    bins_below = round(${config.strategy.minBinsBelow} + (candidate volatility/5)*(${config.strategy.maxBinsBelow - config.strategy.minBinsBelow})) clamped to [${config.strategy.minBinsBelow},${config.strategy.maxBinsBelow}].
    pass deploy_position.volatility = the candidate volatility value.
    For single-side SOL deploys, do not invent upside:
@@ -1446,7 +1506,13 @@ let _latestCandidates = [];
 let _latestCandidatesAt = null;
 
 function setLatestCandidates(candidates = []) {
+  const activeStrategy = getActiveStrategy();
   _latestCandidates = Array.isArray(candidates) ? candidates : [];
+  _latestCandidates = _latestCandidates.map((pool) => {
+    if (!pool || pool._strategy_hint) return pool;
+    pool._strategy_hint = pickStrategyForCandidate(pool, null, activeStrategy);
+    return pool;
+  });
   _latestCandidatesAt = new Date().toISOString();
 }
 
@@ -1913,10 +1979,11 @@ async function deployLatestCandidate(index) {
   }
   const deployAmount = computeDeployAmount((await getWalletBalances()).sol);
   const binsBelow = computeBinsBelow(candidate.volatility);
+  const hintedStrategy = candidate?._strategy_hint?.strategy || null;
   const result = await executeTool("deploy_position", {
     pool_address: candidate.pool,
     amount_y: deployAmount,
-    strategy: config.strategy.strategy,
+    strategy: hintedStrategy || config.strategy.strategy,
     bins_below: binsBelow,
     bins_above: 0,
     pool_name: candidate.name,

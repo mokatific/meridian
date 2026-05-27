@@ -1418,6 +1418,7 @@ export async function getMyPositions({
             position: positionAddress,
             pool: pool.poolAddress,
             pair: tracked?.pool_name || `${pool.tokenX}/${pool.tokenY}`,
+            strategy: tracked?.strategy ?? null,
             base_mint: pool.tokenXMint,
             lower_bin: lowerBin,
             upper_bin: upperBin,

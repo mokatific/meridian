@@ -132,10 +132,10 @@ Only call this if you need the current price to calculate a specific bin range (
       description: `Open a new DLMM liquidity position.
 
 PRIORITY ORDER for strategy and bins:
-Strategy is fixed to the configured default ("${config.strategy.strategy}"). The LLM must NOT override it. User can change strategy by editing user-config.json.
+- If screening provides a strategy_hint, pass it as the strategy.
+- Otherwise, use the configured default ("${config.strategy.strategy}"). The user can change it in user-config.json.
 
 HARD RULES:
-- Never use 'curve'.
 - Bin Step: Only deploy in pools with bin_step between 80 and 125.
 - Volatility must be positive. If volatility is 0, null, or missing, do not deploy.
 - Range must cover at least 35 total bins. Never deploy 1-bin/tiny ranges.
@@ -143,7 +143,7 @@ HARD RULES:
   use bins_below only, keep bins_above=0, and the upper bin will be pinned to the current active bin.
 
 Guidelines (only when user hasn't specified):
-- Strategy: Fixed to "${config.strategy.strategy}" (from config). Do NOT pass a strategy parameter.
+- Strategy: Use strategy_hint when provided; otherwise omit strategy to fall back to config.
 - Bins: choose from configured minBinsBelow/maxBinsBelow by positive volatility. The hard lower floor is 35 bins.
 - Deposit: single-sided SOL only: set amount_y/amount_sol, keep amount_x=0.
 
