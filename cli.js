@@ -9,6 +9,7 @@ import { parseArgs } from "util";
 import os from "os";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 // ─── DRY_RUN must be set before any tool imports ─────────────────
 if (process.argv.includes("--dry-run")) process.env.DRY_RUN = "true";
@@ -23,6 +24,8 @@ if (fs.existsSync(meridianEnv)) {
     override: false,
   });
 }
+
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Output helpers ───────────────────────────────────────────────
 function out(data) {
@@ -642,7 +645,7 @@ switch (subcommand) {
 
   // ── discord-signals ──────────────────────────────────────────────
   case "discord-signals": {
-    const sigFile = path.join(process.cwd(), "discord-signals.json");
+    const sigFile = path.join(ROOT, "discord-signals.json");
     if (!fs.existsSync(sigFile)) {
       out({
         count: 0,
