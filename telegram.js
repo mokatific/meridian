@@ -646,6 +646,7 @@ export async function notifyDeploy({
   binStep,
   baseFee,
   dryRun,
+  narrative,
 }) {
   if (hasActiveLiveMessage()) return;
   const icon = dryRun ? "🧪" : "✅";
@@ -663,13 +664,15 @@ export async function notifyDeploy({
   const posStr = dryRun
     ? `Mode: DRY RUN — no real transaction sent\n`
     : `Position: <code>${position?.slice(0, 8)}...</code>\nTx: <code>${tx?.slice(0, 16)}...</code>`;
+  const narrativeStr = narrative ? `\n\n📖 Narrative\n${normalizeText(narrative)}` : "";
   await sendHTML(
     `${icon} <b>${label}</b> ${pair}\n` +
       `Amount: ${amountSol} SOL\n` +
       priceStr +
       coverageStr +
       poolStr +
-      posStr,
+      posStr +
+      narrativeStr,
   );
 }
 

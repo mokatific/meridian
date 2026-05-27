@@ -685,6 +685,8 @@ export async function executeTool(name, args) {
           binStep: result.bin_step,
           baseFee: result.base_fee,
           dryRun: isDryRun,
+          // forward narrative if provided by the caller or result
+          narrative: args.narrative ?? result.narrative ?? null,
         }).catch(() => {});
         initLogger();
         logPositionOpen({
