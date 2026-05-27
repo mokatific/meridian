@@ -489,12 +489,19 @@ export async function discoverPools({ page_size = 50 } = {}) {
       log("screening", `Discord signal fetch failed: ${error.message}`);
       return [];
     });
+    // Discord only provides the signal (token name/mint/pool_address).
+    // Meteora is the source of truth for pool data — do NOT use discovery_pool values.
     const signalPools = signalCandidates
       .map((candidate) => {
         const discoveryPool = candidate.discovery_pool;
         if (!discoveryPool?.pool_address) return null;
         return {
-          ...discoveryPool,
+          // Minimal skeleton — just enough to identify the pool for Meteora enrichment
+          pool_address: discoveryPool.pool_address,
+          name: discoveryPool.name || `${candidate.base_symbol}-SOL`,
+          pool_type: discoveryPool.pool_type || "dlmm",
+          token_x: discoveryPool.token_x ? { address: discoveryPool.token_x.address } : null,
+          // Discord signal metadata
           discord_signal: true,
           discord_signal_count: candidate.source_count || 1,
           discord_signal_seen_count: candidate.seen_count || 1,
@@ -513,6 +520,7 @@ export async function discoverPools({ page_size = 50 } = {}) {
       const discordOnlyPools = [];
       for (const signalPool of signalPools) {
         if (byPool.has(signalPool.pool_address)) {
+          // Already in Meteora results — just add Discord signal flags
           byPool.set(signalPool.pool_address, {
             ...byPool.get(signalPool.pool_address),
             discord_signal: true,
@@ -522,6 +530,7 @@ export async function discoverPools({ page_size = 50 } = {}) {
             discord_signal_last_seen_at: signalPool.discord_signal_last_seen_at,
           });
         } else {
+          // Not in Meteora — add to refresh queue
           byPool.set(signalPool.pool_address, signalPool);
           discordOnlyPools.push(signalPool);
         }
