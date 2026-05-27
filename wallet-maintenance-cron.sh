@@ -7,7 +7,7 @@
 # 3. Report summary
 
 set -e
-export PATH="/home/ubuntu/.local/bin:/home/ubuntu/.nvm/versions/node/v24.13.0/bin:$PATH"
+export PATH="/home/ubuntu/.local/bin:/home/ubuntu/.local/share/mise/installs/node/24.14.1/bin:$PATH"
 cd /home/ubuntu/meridian
 source ~/.twitter-env 2> /dev/null
 
