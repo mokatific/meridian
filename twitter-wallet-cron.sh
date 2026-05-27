@@ -4,7 +4,7 @@
 
 set -e
 cd /home/ubuntu/meridian
-source ~/.bashrc 2> /dev/null
+export PATH="$HOME/.local/share/mise/shims:$PATH"
 
 exec node --input-type=module -e '
 import { discoverWalletsFromKolTweets } from "./twitter-wallet.js";
