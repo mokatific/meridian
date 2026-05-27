@@ -41,7 +41,7 @@ function actionHint(action) {
   const r = action.result || {};
   switch (action.tool) {
     case "deploy_position":
-      return ` ${a.pool_name || a.pool_address?.slice(0, 8)} ${a.amount_sol} SOL`;
+      return ` ${a.pool_name || a.pool_address?.slice(0, 8)} ${a.amount_y ?? a.amount_sol ?? 0} SOL`;
     case "close_position":
       return ` ${a.position_address?.slice(0, 8)}${r.pnl_usd != null ? ` | PnL $${r.pnl_usd >= 0 ? "+" : ""}${r.pnl_usd} (${r.pnl_pct}%)` : ""}`;
     case "claim_fees":

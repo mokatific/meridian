@@ -129,12 +129,14 @@ let _managementBusy = false; // prevents overlapping management cycles
 let _screeningBusy = false; // prevents overlapping screening cycles
 let _screeningLastTriggered = 0; // epoch ms — prevents management from spamming screening
 let _pollTriggeredAt = 0; // epoch ms — cooldown for poller-triggered management
+let _pnlPollLastRunAt = 0; // epoch ms — minimum spacing for RPC-heavy PnL polling
 const _peakConfirmTimers = new Map();
 const _trailingDropConfirmTimers = new Map();
 const TRAILING_PEAK_CONFIRM_DELAY_MS = 15_000;
 const TRAILING_PEAK_CONFIRM_TOLERANCE = 0.85;
 const TRAILING_DROP_CONFIRM_DELAY_MS = 15_000;
 const TRAILING_DROP_CONFIRM_TOLERANCE_PCT = 1.0;
+const PNL_POLL_MIN_INTERVAL_MS = 10_000;
 
 /** Strip <think>...</think> reasoning blocks that some models leak into output */
 function stripThink(text) {
@@ -1255,8 +1257,17 @@ Summarize the current portfolio health, total fees earned, and performance of al
   // Lightweight 30s PnL poller — updates trailing TP state between management cycles, no LLM
   let _pnlPollBusy = false;
   const pnlPollInterval = setInterval(async () => {
+    const now = Date.now();
+    if (now - _pnlPollLastRunAt < PNL_POLL_MIN_INTERVAL_MS) {
+      log(
+        "state",
+        `[PnL poll] Skipping RPC poll — min interval ${PNL_POLL_MIN_INTERVAL_MS / 1000}s not reached`,
+      );
+      return;
+    }
     if (_managementBusy || _screeningBusy || _pnlPollBusy) return;
     if (getTrackedPositions(true).length === 0) return;
+    _pnlPollLastRunAt = now;
     _pnlPollBusy = true;
     try {
       const result = await getMyPositions({ force: true, silent: true }).catch(() => null);

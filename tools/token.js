@@ -211,9 +211,9 @@ export async function getTokenHolders({ mint, limit = 20 }) {
 
   if (smartWallets.length > 0) {
     const addresses = smartWallets.map((w) => w.address).join(",");
-    const kwRes = await fetch(`${DATAPI_BASE}/holders/${mint}?addresses=${addresses}`).catch(
-      () => null,
-    );
+    const kwRes = await rateLimitedDataPiFetch(
+      `${DATAPI_BASE}/holders/${mint}?addresses=${addresses}`,
+    ).catch(() => null);
     const kwData = kwRes?.ok ? await kwRes.json() : null;
     const kwHolders = Array.isArray(kwData) ? kwData : kwData?.holders || kwData?.data || [];
 

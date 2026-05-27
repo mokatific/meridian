@@ -97,7 +97,7 @@ describe("logAction()", () => {
     logAction({
       tool: "deploy_position",
       success: true,
-      args: { pool_name: "FOO-SOL", amount_sol: 1.25 },
+      args: { pool_name: "FOO-SOL", amount_y: 1.25 },
       result: {},
     });
     expect(consoleSpy).toHaveBeenCalledWith("[deploy_position] ✓ FOO-SOL 1.25 SOL");
