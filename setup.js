@@ -220,19 +220,19 @@ console.log(
 // ─── Section 4: Deployment ────────────────────────────────────────────────────
 console.log("── Deployment ────────────────────────────────────────────────");
 
-const deployAmountSol = await askNum("SOL to deploy per position", e("deployAmountSol", 0.3), {
+const deployAmountSol = await askNum("SOL to deploy per position", e("deployAmountSol", 0.1), {
   min: 0.01,
   max: 50,
 });
 
-const maxPositions = await askNum("Max concurrent positions", e("maxPositions", 3), {
+const maxPositions = await askNum("Max concurrent positions", e("maxPositions", 1), {
   min: 1,
   max: 10,
 });
 
 const minSolToOpen = await askNum(
   "Min SOL balance to open a new position",
-  e("minSolToOpen", parseFloat((deployAmountSol + 0.05).toFixed(3))),
+  e("minSolToOpen", Math.max(0.5, parseFloat((deployAmountSol + 0.1).toFixed(3)))),
   { min: 0.05 },
 );
 
