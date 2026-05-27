@@ -362,6 +362,18 @@ function isTransientProviderError(error) {
   );
 }
 
+function isDailyTokenLimitError(errorLike) {
+  const message = String(
+    errorLike?.message || errorLike?.error?.message || errorLike?.response?.data?.error || "",
+  ).toLowerCase();
+  return (
+    message.includes("daily token limit reached") ||
+    message.includes("1-day window resets") ||
+    message.includes("daily limit") ||
+    message.includes("insufficient_quota")
+  );
+}
+
 /**
  * Core ReAct agent loop.
  *
@@ -458,6 +470,7 @@ export async function agentLoop(
             tools: getToolsForRole(agentType, goal),
             temperature: config.llm.temperature,
             max_tokens: maxOutputTokens ?? config.llm.maxTokens,
+            stream: false,
           };
           if (!omitToolChoice) params.tool_choice = toolChoice;
           response = await usedClient.chat.completions.create(params);
@@ -491,6 +504,27 @@ export async function agentLoop(
             continue;
           }
           if (isTransientProviderError(error)) {
+            if (isDailyTokenLimitError(error)) {
+              if (!providerSwitched && providers.length > 1) {
+                providerSwitched = true;
+                usedClient = providers[1];
+                log(
+                  "agent",
+                  "Primary provider daily quota exhausted — switching to fallback endpoint",
+                );
+                attempt -= 1;
+                continue;
+              }
+
+              const quotaError = new Error(
+                error?.message ||
+                  "Daily token limit reached. Configure another provider key/model or wait for reset.",
+              );
+              quotaError.status = 429;
+              quotaError.hardQuota = true;
+              throw quotaError;
+            }
+
             if (!providerSwitched && providers.length > 1) {
               providerSwitched = true;
               usedClient = providers[1];
@@ -526,6 +560,17 @@ export async function agentLoop(
         if (response?.choices?.length) break;
         const errCode = response?.error?.code || response?.error?.status;
         if (errCode === 429) {
+          const providerMessage = String(response?.error?.message || "");
+          if (isDailyTokenLimitError({ message: providerMessage })) {
+            const quotaError = new Error(
+              providerMessage ||
+                "Daily token limit reached. Configure another provider key/model or wait for reset.",
+            );
+            quotaError.status = 429;
+            quotaError.hardQuota = true;
+            throw quotaError;
+          }
+
           const backoff = Math.min(30000, (attempt + 1) * 10000);
           log(
             "agent",
@@ -798,6 +843,18 @@ export async function agentLoop(
 
       // If it's a rate limit, wait and retry
       if (error.status === 429) {
+        if (error.hardQuota || isDailyTokenLimitError(error)) {
+          log(
+            "agent",
+            "Provider daily token quota exhausted; stopping this run early to avoid retry spam.",
+          );
+          return {
+            content:
+              "LLM provider daily token quota is exhausted. Update to another provider/model key or wait for the daily reset window.",
+            userMessage: goal,
+          };
+        }
+
         log("agent", "Rate limited, waiting 30s...");
         await sleep(30000);
         continue;
