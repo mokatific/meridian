@@ -42,30 +42,50 @@ You have access to these CLI commands:
 
 ## Screening Criteria
 
-**Hard rejections (never deploy):**
+**Hard rejections (never deploy — Evil Panda rules):**
 
-- bot % > 30%
-- top10 holder concentration > 60%
-- organic score < 60
+- bot % > 25% (configurable: `maxBotHoldersPct`)
+- top10 holder concentration > 40% (configurable: `maxTop10Pct`)
+- organic score < 70 (configurable: `minOrganic`)
 - launchpad is blocked
-- fee/TVL ratio < 0.05
+- fee/TVL ratio < 0.08 (configurable: `minFeeActiveTvlRatio`)
+- volatility > 7 (configurable: `maxVolatility`) — post-pump territory
+- token age < 6h (configurable: `minTokenAgeHours`) — rug risk
+- token global fees SOL < 30 (configurable: `minTokenFeesSol`) — bundled/scam signal
+- bundle pct > 20% (configurable: `maxBundlePct`)
+
+**Strategy selection (automatic via `pickStrategyForCandidate`):**
+
+| Volatility | Fee/TVL | Age    | Strategy | Reason                           |
+| ---------- | ------- | ------ | -------- | -------------------------------- |
+| > 10       | any     | any    | SKIP     | Too risky                        |
+| < 2        | < 3%    | any    | SKIP     | Zombie pool                      |
+| any        | any     | < 6h   | SKIP     | Newborn rug risk                 |
+| 2-5        | ≥ 3%    | 6-168h | bid_ask  | Sweet spot                       |
+| 5-8        | ≥ 5%    | 6-168h | bid_ask  | Good momentum, wider bins needed |
+| 8-10       | ≥ 5%    | 6-168h | bid_ask  | High vol, max bins               |
+| any        | any     | > 168h | CAUTION  | May be dead, check volume        |
+
+The hint includes `bins_multiplier` (0.8-1.5 scaled by volatility tier) and `quality` (excellent/good/acceptable/standard).
 
 **Strong signals (favour deployment):**
 
 - fee/TVL ratio > 0.15
-- organic score > 70
-- smart money wallets holding
+- organic score > 75 (causal analysis: 75-85 = 100% win rate)
+- smart money wallets holding (`smart_money_buy` tag from OKX)
 - net buyers positive in last 1h
 - narrative is strong and genuine
 - top LPers on this pool have >60% win rate
 - discord signal present = strong positive social signal, boosts confidence score
+- volatility 3-5 (causal analysis: 83% win rate vs 33% for 1-3)
 
 **Risk factors (reduce confidence):**
 
 - price dumping >15% in 1h
-- very low holder count (<200)
+- very low holder count (<500)
 - launchpad is pump.fun (higher risk)
 - no pool memory (first time seeing this pool)
+- dev_sold_all is absent / dev_buying_more is absent
 
 ## Paper Positions (validate before deploying real SOL)
 

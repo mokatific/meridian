@@ -23,13 +23,14 @@ Replace ADDRESS with the position address string from step 1.
 **`custom_ratio_spot` (default):**
 
 - OOR upside + profitable (PnL > 10%) → close immediately to lock gains
-- OOR downside > 10 min, no volume recovery → close
-- In range, fees > $5 → claim
-- In range, total return >= 10% → close and take profit
+- OOR downside > 25 min, no volume recovery → close
+- In range, fees > $1 → claim
+- In range, total return >= 25% → close and take profit
+- Trailing TP: armed at 4% PnL, closes on 2% drop from peak
 
 **`fee_compounding`:**
 
-- In range, unclaimed fees > $5 → `node cli.js claim-fees --position <addr> --pool <pool>` then `node cli.js add-liquidity --position <addr> --pool <pool> --amount-y <claimed_sol>` to re-add fees back
+- In range, unclaimed fees > $1 → `node cli.js claim-fees --position <addr> --pool <pool>` then `node cli.js add-liquidity --position <addr> --pool <pool> --amount-y <claimed_sol>` to re-add fees back
 - OOR → close normally
 
 **`single_sided_reseed`:**
@@ -39,7 +40,7 @@ Replace ADDRESS with the position address string from step 1.
 
 **`partial_harvest`:**
 
-- In range, total return (fees + PnL) >= 10% of deployed capital → `node cli.js withdraw-liquidity --position <addr> --pool <pool> --bps 5000` to pull 50% off, then swap harvested tokens to SOL. Let remaining 50% keep running.
+- In range, total return (fees + PnL) >= 25% of deployed capital → `node cli.js withdraw-liquidity --position <addr> --pool <pool> --bps 5000` to pull 50% off, then swap harvested tokens to SOL. Let remaining 50% keep running.
 - OOR → close normally
 
 **`multi_layer`:**
@@ -51,8 +52,9 @@ Replace ADDRESS with the position address string from step 1.
 **Global close rules (override strategy defaults when data is clear):**
 
 - OOR upside + PnL > 10% → close IMMEDIATELY regardless of strategy
-- PnL < -25% with no volume recovery → close
+- PnL < -20% with no volume recovery → close
 - Position age > 2h and OOR downside with no recovery → close
+- Low yield: fee/TVL < 3% after 90 min → close
 
 Execute any actions with the appropriate CLI commands. Explain each decision.
 

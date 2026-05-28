@@ -17,10 +17,10 @@ lessons.js            Learning engine: records closed-position perf, derives les
 pool-memory.js        Per-pool deploy history + snapshots (pool-memory.json)
 strategy-library.js   Saved LP strategies (strategy-library.json)
 paper-positions.js    Live forward-running paper LP positions (paper-positions.json) — ticked every 5m
-dry-run-simulator.js  DRY_RUN-mode virtual position tracker used by the management cron
+dry-run-simulator.js  DRY_RUN-mode virtual position tracker used by the management cron + 30s RPC poller
 wallet-evolution.js   Auto-discovery + pruning of smart wallets
-briefing.js           Daily Telegram briefing (HTML)
-telegram.js           Telegram bot: polling, notifications (deploy/close/swap/OOR)
+briefing.js           Daily Telegram briefing (HTML) — includes virtual wallet summary in dry-run
+telegram.js           Telegram bot: polling, notifications (deploy/close/swap/OOR) with rich dry-run close messages
 hivemind.js           Agent Meridian HiveMind sync
 smart-wallets.js      KOL/alpha wallet tracker (smart-wallets.json)
 token-blacklist.js    Permanent token blacklist (token-blacklist.json)
@@ -31,6 +31,9 @@ skipped-tracker.js    Missed-opportunity tracker (skipped-pools.json)
 position-logger.js    Append-only audit trail (position-journal.db, SQLite)
 logger.js             Daily-rotating log files + action audit trail
 cli.js                CLI surface — each tool exposed as a subcommand with JSON output
+twitter-wallet.js     Twitter/X KOL tweet scraper for wallet discovery
+wallet-maintenance-cron.sh  Hermes cron: Twitter KOL discovery + wallet pruning
+twitter-wallet-cron.sh      Hermes cron: Twitter KOL discovery only
 
 tools/
   definitions.js      Tool schemas in OpenAI format (what LLM sees)
@@ -43,6 +46,12 @@ tools/
   simulator.js        Thin wrappers over paper-positions.js (open/get/close/list)
   chart-indicators.js RSI/Bollinger/Supertrend/Fibonacci preset evaluation
   agent-meridian.js   Helper for the Agent Meridian relay API
+  okx.js              OKX advanced-info, cluster list, price info via relay or direct API
+
+utils/
+  rpc-cache.js        RPC Connection proxy: TTL cache + failover + sendAndConfirmPolling (HTTP polling)
+  datapi-limiter.js   Rate-limited fetch wrapper for datapi.jup.ag
+  lessonManager.js    Lesson scoring, feedback loop, auto-pruning
 ```
 
 ---
@@ -82,20 +91,21 @@ A redacted template lives in `user-config.example.json` — copy it to `user-con
 
 ### Meta
 
-| Key    | Default                  | Description                                                                       |
-| ------ | ------------------------ | --------------------------------------------------------------------------------- |
-| preset | `"custom"`               | Free-form label shown in `/config`; no runtime behavior.                          |
-| rpcUrl | env `RPC_URL`            | Solana RPC endpoint. Written to `process.env.RPC_URL` if env is unset.            |
-| dryRun | env `DRY_RUN` or `false` | `true` blocks all on-chain sends (deploy / close / claim / swap). Written to env. |
+| Key            | Default                  | Description                                                                       |
+| -------------- | ------------------------ | --------------------------------------------------------------------------------- |
+| preset         | `"custom"`               | Free-form label shown in `/config`; no runtime behavior.                          |
+| rpcUrl         | env `RPC_URL`            | Solana RPC endpoint. Written to `process.env.RPC_URL` if env is unset.            |
+| rpcUrlFallback | `""`                     | Secondary RPC endpoint. Written to `RPC_URL_FALLBACK` env for automatic failover. |
+| dryRun         | env `DRY_RUN` or `false` | `true` blocks all on-chain sends (deploy / close / claim / swap). Written to env. |
 
 ### Dry-Run Simulator (only used when `dryRun=true`)
 
-| Key                   | Default | Description                                            |
-| --------------------- | ------- | ------------------------------------------------------ |
-| initialVirtualBalance | `0.65`  | SOL — starting wallet balance for the virtual ledger.  |
-| slippagePct           | `2`     | % slippage applied to simulated auto-swap.             |
-| gasFeePerDeploy       | `0.005` | SOL deducted from virtual wallet per simulated deploy. |
-| gasFeePerClose        | `0.002` | SOL deducted from virtual wallet per simulated close.  |
+| Key                   | Default  | Description                                            |
+| --------------------- | -------- | ------------------------------------------------------ |
+| initialVirtualBalance | `0.65`   | SOL — starting wallet balance for the virtual ledger.  |
+| slippagePct           | `2`      | % slippage applied to simulated auto-swap.             |
+| gasFeePerDeploy       | `0.0005` | SOL deducted from virtual wallet per simulated deploy. |
+| gasFeePerClose        | `0.0002` | SOL deducted from virtual wallet per simulated close.  |
 
 ### Capital / Position Sizing
 
@@ -114,8 +124,8 @@ A redacted template lives in `user-config.example.json` — copy it to `user-con
 | ---------------- | ----------- | -------------------------------------------------------------- |
 | strategy         | `"bid_ask"` | DLMM liquidity strategy: `bid_ask` \| `spot` \| `curve`.       |
 | minBinsBelow     | `35`        | SCREENER min bin range; clamped to `MIN_SAFE_BINS_BELOW` (35). |
-| maxBinsBelow     | `69`        | SCREENER max bin range; scales with volatility.                |
-| defaultBinsBelow | `69`        | Fallback when volatility is unknown.                           |
+| maxBinsBelow     | `120`       | SCREENER max bin range; scales with volatility.                |
+| defaultBinsBelow | `80`        | Fallback when volatility is unknown.                           |
 
 ### Screening Filters
 
@@ -157,6 +167,7 @@ A redacted template lives in `user-config.example.json` — copy it to `user-con
 | outOfRangeWaitMinutes               | `30`      | Grace period before OOR triggers close.                              |
 | oorCooldownTriggerCount             | `3`       | # of OOR-closes within window before cooldown engages.               |
 | oorCooldownHours                    | `12`      | Hours to blacklist the pool after repeated OOR.                      |
+| lowYieldCooldownHours               | `4`       | Hours to cool down a pool after a low-yield close.                   |
 | repeatDeployCooldownEnabled         | `true`    | Throttle deploys to the same pool/token.                             |
 | repeatDeployCooldownTriggerCount    | `3`       | # of recent deploys before cooldown engages.                         |
 | repeatDeployCooldownHours           | `12`      | Cooldown duration.                                                   |
@@ -183,14 +194,14 @@ A redacted template lives in `user-config.example.json` — copy it to `user-con
 
 ### LLM
 
-| Key             | Default                   | Description                                                                |
-| --------------- | ------------------------- | -------------------------------------------------------------------------- |
-| temperature     | `0.373`                   | Sampling temperature.                                                      |
-| maxTokens       | `4096`                    | Max completion tokens; must be ≥ 2048 (free models often fail below).      |
-| maxSteps        | `20`                      | ReAct loop safety cap (steps per goal).                                    |
-| managementModel | `openrouter/healer-alpha` | Model used for MANAGER cycles. Falls back to env `LLM_MODEL`.              |
-| screeningModel  | `openrouter/hunter-alpha` | Model used for SCREENER cycles. Falls back to env `LLM_MODEL`.             |
-| generalModel    | `openrouter/healer-alpha` | Model used for `/chat`, REPL, ad-hoc goals. Falls back to env `LLM_MODEL`. |
+| Key             | Default      | Description                                                                |
+| --------------- | ------------ | -------------------------------------------------------------------------- |
+| temperature     | `0.2`        | Sampling temperature.                                                      |
+| maxTokens       | `4096`       | Max completion tokens; must be ≥ 2048 (free models often fail below).      |
+| maxSteps        | `20`         | ReAct loop safety cap (steps per goal).                                    |
+| managementModel | `"meridian"` | Model used for MANAGER cycles. Falls back to env `LLM_MODEL`.              |
+| screeningModel  | `"meridian"` | Model used for SCREENER cycles. Falls back to env `LLM_MODEL`.             |
+| generalModel    | `"meridian"` | Model used for `/chat`, REPL, ad-hoc goals. Falls back to env `LLM_MODEL`. |
 
 ### Darwinian Signal-Weight Learning
 
@@ -277,16 +288,17 @@ Before `deploy_position` executes:
 
 ## bins_below Calculation (SCREENER)
 
-Linear formula based on positive pool volatility (set in screener prompt, `index.js`):
+Evil Panda Fibonacci-scaled formula (index.js `computeBinsBelow`):
 
 ```
-bins_below = round(minBinsBelow + (volatility / 5) * (maxBinsBelow - minBinsBelow)), clamped to [minBinsBelow, maxBinsBelow]
+base = round(minBinsBelow + (volatility / 5) * (maxBinsBelow - minBinsBelow))
+effectiveMultiplier = 0.8 (vol<2) | 1.0 (vol 2-5) | 1.3 (vol 5-8) | 1.5 (vol≥8)
+bins_below = clamp(round(base × effectiveMultiplier), min=minBinsBelow, max=maxBinsBelow×1.5)
 ```
 
-- Default clamp is `[35, 69]`
+- Default clamp is `[50, 120]` (ceiling expands to `120 × 1.5 = 180` for extreme volatility)
 - `volatility <= 0`, null, or non-finite → skip/refuse deploy
-- High volatility (5+) → maxBinsBelow
-- Any value in between is valid (continuous, not tiered)
+- `bins_multiplier` from `pickStrategyForCandidate()` is applied on top and caps at the Fibonacci tier max
 
 ---
 
@@ -385,7 +397,7 @@ const actualBaseFee =
 
 ## Model Configuration
 
-- Default model: `process.env.LLM_MODEL` or `openrouter/healer-alpha`
+- Default model: `process.env.LLM_MODEL` or `"meridian"` (via mokarouter)
 - Fallback on 502/503/529: `deepseek-flash-combo` (constant `FALLBACK_MODEL` in agent.js), then retry with exponential backoff
 - Optional fallback **endpoint**: set `LLM_FALLBACK_BASE_URL` + `LLM_FALLBACK_API_KEY` and `LLM_ENABLE_FALLBACK_SWITCHING=true`. Useful when running through SwiftRouter and you want to fail over to OpenRouter on outages.
 - Per-role models: `managementModel`, `screeningModel`, `generalModel` in user-config.json
@@ -444,6 +456,18 @@ Agent Meridian HiveMind sync is handled by `hivemind.js`. It uses built-in Agent
 
 - `lessons.js evolveThresholds()` evolves `maxVolatility` + `minFeeActiveTvlRatio` (fixed from `minFeeTvlRatio`). Both keys now exist in config.js and are properly applied.
 - `get_wallet_positions` tool (dlmm.js) is in definitions.js but not in MANAGER_TOOLS or SCREENER_TOOLS — only available in GENERAL role.
+- `discover_wallets_from_twitter` is only in GENERAL intent tools, not in SCREENER_TOOLS — screener can't call it autonomously.
+
+---
+
+## Deploy Safety
+
+Two guards prevent over-deploying:
+
+1. **`maxPositions` hard cap** — `deploy_position` in executor.js checks open position count before calling `addLiquidity`. Returns `{ blocked: true, reason: "..." }` if at cap.
+2. **Deploy mutex** — a module-level `_deployInProgress` flag in executor.js prevents concurrent deploy calls from racing on the same pool. Second caller gets `{ blocked: true, reason: "deploy already in progress" }`.
+
+Both return `blocked: true` (not `success: false`), so callers must check `result?.blocked` before reading `result.position`.
 
 ---
 
@@ -468,27 +492,31 @@ Integration exists in `lessons.js` (`recordPerformance`). Lessons now have a fee
 
 ### Operations blocked in DRY_RUN
 
-| Location              | Function          | Blocked behavior                                                        |
-| --------------------- | ----------------- | ----------------------------------------------------------------------- |
-| `tools/dlmm.js:573`   | `addLiquidity()`  | Do not send TX; return details of the position that _would_ be deployed |
-| `tools/dlmm.js:1460`  | `claimFees()`     | Do not claim fees                                                       |
-| `tools/dlmm.js:1506`  | `closePosition()` | Do not close positions                                                  |
-| `tools/wallet.js:153` | `swapToken()`     | Do not perform swaps                                                    |
+| Location          | Function          | Blocked behavior                                                        |
+| ----------------- | ----------------- | ----------------------------------------------------------------------- |
+| `tools/dlmm.js`   | `addLiquidity()`  | Do not send TX; return details of the position that _would_ be deployed |
+| `tools/dlmm.js`   | `claimFees()`     | Do not claim fees                                                       |
+| `tools/dlmm.js`   | `closePosition()` | Do not close positions                                                  |
+| `tools/wallet.js` | `swapToken()`     | Do not perform swaps                                                    |
 
 ### What still runs in DRY_RUN
 
 - **Screening** — pool discovery remains active (balance checks skipped)
 - **Balance checks** in executor are skipped so a wallet with zero SOL can still run
 - **Analysis & decision-making** — the agent can evaluate pools, compute ranges, etc.
+- **Virtual position tracking** — `dry-run-simulator.js` mirrors all management logic
+- **30s RPC poller** — evaluates virtual positions every 30s using live RPC prices, same as live mode
+- **Rich Telegram notifications** — virtual closes show fees, hold time, price change with 🧪 icon
+- **Learning pipeline** — virtual closes feed lessons, threshold evolution, Darwin weights, causal analysis
 - **HiveMind** — reports `dryRun: true` to the central service
 
 ### Startup log
 
 ```
-index.js:45 → log "Mode: DRY RUN" or "Mode: LIVE"
+index.js → log "Mode: DRY RUN" or "Mode: LIVE"
 ```
 
-**Conclusion:** DRY_RUN mode is safe for testing — the full agent (screening, analysis, decision) runs, but no on-chain transactions are sent.
+**Conclusion:** DRY_RUN mode is safe for testing — the full agent (screening, analysis, decision) runs, virtual positions are tracked with real market data, and all learning systems are fed. The only difference from live is no on-chain transactions.
 
 ---
 

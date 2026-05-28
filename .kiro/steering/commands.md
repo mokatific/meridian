@@ -56,13 +56,13 @@ node cli.js pnl <position_address>
 
 3. Note the `strategy` field. Apply strategy-specific rules:
 
-**`custom_ratio_spot`:** OOR upside + PnL > 10% → close immediately | OOR downside > 10 min, no volume → close | fees > $5 → claim | total return >= 10% → close
+**`custom_ratio_spot`:** OOR upside + PnL > 10% → close immediately | OOR downside > 25 min, no volume → close | fees > $1 → claim | total return >= 25% → close
 
-**`fee_compounding`:** fees > $5 AND in range → claim then add-liquidity back | OOR → close normally
+**`fee_compounding`:** fees > $1 AND in range → claim then add-liquidity back | OOR → close normally
 
 **`single_sided_reseed`:** OOR downside + volume still present → withdraw-liquidity then add-liquidity token-only at new price | OOR + no volume → close normally
 
-**`partial_harvest`:** total return >= 10% → withdraw-liquidity(bps=5000), swap harvested tokens to SOL, let remaining 50% run | OOR → close normally
+**`partial_harvest`:** total return >= 25% → withdraw-liquidity(bps=5000), swap harvested tokens to SOL, let remaining 50% run | OOR → close normally
 
 **`multi_layer`:** manage each sub-position independently using custom_ratio_spot rules
 
@@ -71,8 +71,9 @@ node cli.js pnl <position_address>
 **Global close rules (override strategy defaults):**
 
 - OOR upside + PnL > 10% → close IMMEDIATELY regardless of strategy
-- PnL < -25% with no volume recovery → close
+- PnL < -20% with no volume recovery → close
 - Position age > 2h and OOR downside with no recovery → close
+- Trailing TP: armed at 4% PnL, closes on 2% drop from peak
 
 ---
 
@@ -162,7 +163,8 @@ node cli.js pool-memory --pool <pool_address>
 
 **Step 6 — Analyse and decide:**
 
-- Hard reject: bot% > 30%, top10 > 60%, organic < 60, fee/TVL < 0.2
+- Hard reject: bot% > 25%, top10 > 40%, organic < 70, fee/TVL < 0.08, volatility > 7, token age < 6h, bundle% > 20%
+- Prefer: volatility 3-5 (83% win rate), organic 75-85 (100% win rate), smart_money_buy tag
 - Score by: smart money signal > fee_active_tvl_ratio > organic_score > top LPer win rate > low bundlers_pct
 - If pool-memory shows poor range efficiency or repeated OOR closes → penalise heavily
 - If top LPers have <50% win rate → reduce confidence

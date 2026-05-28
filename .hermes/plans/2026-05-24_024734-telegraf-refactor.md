@@ -1,5 +1,7 @@
 # Refactor Plan: Migrate Meridian Telegram to Telegraf
 
+> **Status: SUPERSEDED** — grammY was chosen over Telegraf (see `2026-05-24_032734-grammy-refactor.md`). This plan is kept for reference only. The refactor has not been executed; `telegram.js` remains the custom polling implementation.
+
 ## Goal
 
 Refactor Meridian's Telegram layer from custom polling + monolithic `index.js` (2200+ lines) onto the Telegraf framework. Result: modular, maintainable, extensible — without touching core logic (agent, screening, management, lessons).

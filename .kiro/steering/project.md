@@ -21,7 +21,7 @@ lessons.js            Learning engine: records closed-position perf, derives les
 pool-memory.js        Per-pool deploy history + snapshots (pool-memory.json)
 strategy-library.js   Saved LP strategies (strategy-library.json)
 paper-positions.js    Live forward-running paper LP positions (paper-positions.json) — ticked every 5m
-dry-run-simulator.js  DRY_RUN-mode virtual position tracker used by the management cron
+dry-run-simulator.js  DRY_RUN-mode virtual position tracker + 30s RPC price poller
 wallet-evolution.js   Auto-discovery + pruning of smart wallets
 briefing.js           Daily Telegram briefing (HTML)
 telegram.js           Telegram bot: polling, notifications (deploy/close/swap/OOR)
@@ -30,8 +30,12 @@ smart-wallets.js      KOL/alpha wallet tracker (smart-wallets.json)
 token-blacklist.js    Permanent token blacklist (token-blacklist.json)
 dev-blocklist.js      Blocked deployer wallets (deployer-blacklist.json)
 causal-analysis.js    Auto-analysis of WHY closed positions won or lost (causal-analysis.json)
+signal-weights.js     Darwin signal-weight learning (signal-weights.json)
+skipped-tracker.js    Missed-opportunity tracker (skipped-pools.json)
+position-logger.js    Append-only audit trail (position-journal.db, SQLite)
 logger.js             Daily-rotating log files + action audit trail
 cli.js                CLI surface — each tool exposed as a subcommand with JSON output
+twitter-wallet.js     Twitter/X KOL tweet scraper for wallet discovery
 
 tools/
   definitions.js      Tool schemas in OpenAI format (what LLM sees)
@@ -43,6 +47,13 @@ tools/
   study.js            Top LPer study via LPAgent API
   simulator.js        Thin wrappers over paper-positions.js (open/get/close/list)
   chart-indicators.js RSI/Bollinger/Supertrend/Fibonacci preset evaluation
+  agent-meridian.js   Helper for the Agent Meridian relay API
+  okx.js              OKX advanced-info, cluster list, price info via relay or direct API
+
+utils/
+  rpc-cache.js        RPC Connection proxy: TTL cache + failover + sendAndConfirmPolling
+  datapi-limiter.js   Rate-limited fetch wrapper for datapi.jup.ag
+  lessonManager.js    Lesson scoring, feedback loop, auto-pruning
 ```
 
 ---
@@ -275,8 +286,19 @@ Agent Meridian HiveMind sync is handled by `hivemind.js`. It uses built-in Agent
 
 ## Known Issues / Tech Debt
 
-- `lessons.js evolveThresholds()` evolves `maxVolatility` + `minFeeTvlRatio` (wrong key names — should be `minFeeActiveTvlRatio`; `maxVolatility` doesn't exist in config at all). The evolution is a no-op for those keys.
 - `get_wallet_positions` tool (dlmm.js) is in definitions.js but not in MANAGER_TOOLS or SCREENER_TOOLS — only available in GENERAL role.
+- `discover_wallets_from_twitter` is GENERAL-only; screener cannot call it autonomously.
+
+---
+
+## Deploy Safety
+
+Two guards prevent over-deploying:
+
+1. **`maxPositions` hard cap** — live position count checked in executor.js before `addLiquidity`; returns `{ blocked: true }` if at cap.
+2. **Deploy mutex** — `_deployInProgress` flag prevents concurrent parallel deploy calls from racing.
+
+Both return `blocked: true` — callers must check `result?.blocked` before reading `result.position`.
 
 ---
 

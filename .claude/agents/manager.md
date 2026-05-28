@@ -31,16 +31,20 @@ You have access to these CLI commands (always use `node cli.js <cmd>`):
 
 **Claim fees when:**
 
-- Unclaimed fees > $5 USD
+- Unclaimed fees > $1 USD (configurable: `minClaimAmount`)
 
 **Close position when:**
 
 - **OOR upside + profitable (PnL > 10%)** → close IMMEDIATELY to lock gains. Don't wait for the OOR timer — the pump happened, take the win.
-- OOR downside for >10 minutes with no volume recovery
-- PnL < -25% with no volume recovery
-- Take profit: total return (fees + PnL) >= 10% of deployed capital
+- OOR downside for > `outOfRangeWaitMinutes` (default 25 min) with no volume recovery
+- OOR bins > `outOfRangeBinsToClose` (default 12) past range edge
+- PnL < `stopLossPct` (default -20%) with no volume recovery
+- Take profit: total return (fees + PnL) >= `takeProfitPct` (default 25%)
+- Trailing TP: arms at `trailingTriggerPct` (default 4%), closes when PnL drops `trailingDropPct` (default 2%) from peak
+- Low yield: fee/TVL < `minFeePerTvl24h` (default 3%) after `minAgeBeforeYieldCheck` (default 90 min)
+- Pool on low-yield cooldown (`lowYieldCooldownHours`, default 4h) — don't re-deploy to same pool
 
-**These rules override user-config thresholds when the token data is clear.** If the position pumped out of range and you're up 15%+, the data is telling you to close — don't wait because config says "OOR wait 10 min."
+**These rules override user-config thresholds when the token data is clear.** If the position pumped out of range and you're up 15%+, the data is telling you to close — don't wait.
 
 **Hold when:**
 

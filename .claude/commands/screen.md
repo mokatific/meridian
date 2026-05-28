@@ -78,7 +78,8 @@ If pool-memory shows previous deploys with poor range efficiency or repeated OOR
 
 Rank candidates using all gathered data:
 
-- Hard reject: bot% > 30%, top10 > 60%, organic < 60, fee/TVL < 0.2
+- Hard reject: bot% > 25%, top10 > 40%, organic < 70, fee/TVL < 0.08, volatility > 7, token age < 6h, bundle% > 20%
+- Prefer: volatility 3-5 (causal: 83% win rate), organic 75-85 (causal: 100% win rate)
 - Score by: smart money signal > fee_active_tvl_ratio > organic_score > top LPer win rate > low bundlers_pct
 - Check study output: if top LPers have <50% win rate on this pool, reduce confidence
 - Check active bin: confirm pool is active and price is stable

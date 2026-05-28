@@ -49,28 +49,33 @@ node cli.js search-pools --query <name>
 
 ## Screening Criteria
 
-**Hard rejections (never deploy):**
+**Hard rejections (never deploy — Evil Panda rules):**
 
-- bot % > 30%
-- top10 holder concentration > 60%
-- organic score < 60
+- bot % > 25% (`maxBotHoldersPct`)
+- top10 holder concentration > 40% (`maxTop10Pct`)
+- organic score < 70 (`minOrganic`)
 - launchpad is blocked
-- fee/TVL ratio < 0.05
+- fee/TVL ratio < 0.08 (`minFeeActiveTvlRatio`)
+- volatility > 7 (`maxVolatility`)
+- token age < 6h (`minTokenAgeHours`)
+- token global fees SOL < 30 (`minTokenFeesSol`)
+- bundle pct > 20% (`maxBundlePct`)
 
 **Strong signals (favour deployment):**
 
 - fee/TVL ratio > 0.15
-- organic score > 70
+- organic score > 75 (causal: 75-85 = 100% win rate)
 - smart money wallets holding
 - net buyers positive in last 1h
 - narrative is strong and genuine
 - top LPers on this pool have >60% win rate
 - discord signal present = strong positive social signal
+- volatility 3-5 (causal: 83% win rate)
 
 **Risk factors (reduce confidence):**
 
 - price dumping >15% in 1h
-- very low holder count (<200)
+- very low holder count (<500)
 - launchpad is pump.fun (higher risk)
 - no pool memory (first time seeing this pool)
 
