@@ -285,13 +285,11 @@ async function _evaluatePosition(pos) {
   const hours_held = minutes_held / 60;
 
   // ── Fee estimation ────────────────────────────────────────────
-  // fee_active_tvl_ratio is per-timeframe (5m). Convert to per-hour:
-  // 5m timeframe → 12 periods/hour → hourly_fee_tvl = ratio * 12
-  // Then scale by hours held with a realistic capture rate (0.7 = 70% of fees go to LPs)
+  // fee_active_tvl_ratio from getPoolDetail("1h") is fees/activeTVL over the last 1h.
+  // It's already a per-hour rate — no period multiplier needed.
+  // Scale by hours held with a 70% LP capture rate. Cap at 5% (realistic ceiling).
   const currentFeeTvl = poolData?.fee_active_tvl_ratio ?? pos.fee_tvl_ratio ?? 0;
-  const periodsPerHour = 12; // for 5m timeframe
-  const hourlyFeeTvl = currentFeeTvl * periodsPerHour;
-  const estimated_fee_pct = Math.min(hourlyFeeTvl * hours_held * 0.7, 80);
+  const estimated_fee_pct = Math.min(currentFeeTvl * hours_held * 0.7, 5);
   const fees_usd = (pos.initial_value_usd ?? 0) * (estimated_fee_pct / 100);
 
   // ── Price change estimation ───────────────────────────────────
@@ -305,7 +303,8 @@ async function _evaluatePosition(pos) {
   let priceSource = "none";
   const initialPrice = pos.initial_price;
 
-  const rpcPrice = await _getRpcPoolPrice(pos.pool);
+  // Skip RPC calls in dry-run — they hit the real chain and can fail with plan limits
+  const rpcPrice = null;
   if (rpcPrice != null && initialPrice != null && initialPrice > 0) {
     priceChangePct = ((rpcPrice - initialPrice) / initialPrice) * 100;
     priceSource = "rpc";
