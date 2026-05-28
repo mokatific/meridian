@@ -470,7 +470,6 @@ export async function agentLoop(
             tools: getToolsForRole(agentType, goal),
             temperature: config.llm.temperature,
             max_tokens: maxOutputTokens ?? config.llm.maxTokens,
-            stream: false,
           };
           if (!omitToolChoice) params.tool_choice = toolChoice;
           response = await usedClient.chat.completions.create(params);
