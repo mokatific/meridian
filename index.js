@@ -162,6 +162,12 @@ const STRATEGY_AUTO_THRESHOLDS = {
   highBinStep: 125,
   lowBinStep: 85,
   strongFeeTvl: 7,
+  // Evil Panda thresholds for small wallet survival
+  evilPandaMinVolatility: 2, // below this = too quiet, low fee potential
+  evilPandaMaxVolatility: 10, // above this = too risky for small wallet
+  evilPandaMinFeeTvl: 3, // minimum fee/TVL % to consider (lower = not worth gas)
+  evilPandaMinAgeHours: 4, // tokens younger than this = rug risk
+  evilPandaMaxAgeHours: 168, // tokens older than 7 days = may be dead
 };
 
 function pickStrategyForCandidate(pool, tokenInfo, activeStrategy) {
@@ -179,29 +185,130 @@ function pickStrategyForCandidate(pool, tokenInfo, activeStrategy) {
   const volatility = toNum(pool?.volatility);
   const binStep = toNum(pool?.bin_step);
   const feeTvl = toNum(pool?.fee_active_tvl_ratio ?? pool?.fee_tvl_ratio);
+  const volume = toNum(pool?.volume_window ?? pool?.volume);
+  const tvl = toNum(pool?.tvl);
 
-  if (ageHours != null && ageHours <= STRATEGY_AUTO_THRESHOLDS.newTokenHours) {
+  // ─── Evil Panda Strategy Selection ─────────────────────────────────
+  // Core philosophy: Single-sided SOL bid_ask, survive the dump, sell on bounce.
+  // Small wallets (under 2 SOL) should ALWAYS use bid_ask for gas efficiency.
+  // 
+  // Decision matrix based on pool characteristics:
+  //
+  // | Volatility | Fee/TVL | Age      | Strategy  | Reason                           |
+  // |------------|---------|----------|-----------|----------------------------------|
+  // | > 10       | any     | any      | SKIP      | Too risky, wait for correction   |
+  // | < 2        | < 3%    | any      | SKIP      | Zombie pool, not worth gas       |
+  // | any        | any     | < 4h     | SKIP      | Newborn rug risk                 |
+  // | 2-5        | ≥ 3%    | 4-168h   | bid_ask   | Sweet spot, stable fee capture   |
+  // | 5-8        | ≥ 5%    | 4-168h   | bid_ask   | Good momentum, wider bins needed |
+  // | 8-10       | ≥ 5%    | 4-168h   | bid_ask   | High vol but acceptable, max bins|
+  // | any        | any     | > 168h   | CAUTION   | May be dead, check volume        |
+  //
+  // NEVER use 'spot' or 'curve' for small wallets — they require dual-sided
+  // liquidity which this agent blocks (amount_x > 0 rejected in executor).
+  // ───────────────────────────────────────────────────────────────────
+
+  const T = STRATEGY_AUTO_THRESHOLDS;
+
+  // 1. Age-based hard filters (Evil Panda: "skip tokens that haven't survived 24h")
+  if (ageHours != null && ageHours < T.evilPandaMinAgeHours) {
     return {
-      strategy: "spot",
-      reason: `new token age <= ${STRATEGY_AUTO_THRESHOLDS.newTokenHours}h`,
+      strategy: "skip",
+      reason: `token age ${ageHours?.toFixed(1)}h < ${T.evilPandaMinAgeHours}h (Evil Panda: newborn rug risk)`,
+      recommendation: "wait for token to mature or skip entirely",
     };
   }
 
-  if (
-    (volatility != null && volatility >= STRATEGY_AUTO_THRESHOLDS.highVolatility) ||
-    (volatility == null && binStep != null && binStep >= STRATEGY_AUTO_THRESHOLDS.highBinStep)
-  ) {
-    return { strategy: "bid_ask", reason: "high volatility or bin step" };
+  // 2. Volatility extremes (Evil Panda: avoid extreme vol for small wallets)
+  if (volatility != null && volatility > T.evilPandaMaxVolatility) {
+    return {
+      strategy: "skip",
+      reason: `volatility ${volatility?.toFixed(1)} > ${T.evilPandaMaxVolatility} (too risky for small wallet)`,
+      recommendation: "wait for volatility to settle or skip this cycle",
+    };
   }
 
-  const lowVol =
-    (volatility != null && volatility <= STRATEGY_AUTO_THRESHOLDS.lowVolatility) ||
-    (volatility == null && binStep != null && binStep <= STRATEGY_AUTO_THRESHOLDS.lowBinStep);
-  if (lowVol && feeTvl != null && feeTvl >= STRATEGY_AUTO_THRESHOLDS.strongFeeTvl) {
-    return { strategy: "curve", reason: "low volatility with strong fee/TVL" };
+  if (volatility != null && volatility < T.evilPandaMinVolatility) {
+    // Low volatility = low fee potential. Only worth it if fee/TVL is high.
+    if (feeTvl != null && feeTvl < T.evilPandaMinFeeTvl) {
+      return {
+        strategy: "skip",
+        reason: `volatility ${volatility?.toFixed(1)} < ${T.evilPandaMinVolatility} AND fee/TVL ${feeTvl?.toFixed(2)}% < ${T.evilPandaMinFeeTvl}% (zombie pool)`,
+        recommendation: "skip — not worth gas cost for minimal fees",
+      };
+    }
   }
 
-  return { strategy: "bid_ask", reason: "default" };
+  // 3. Fee/TVL sanity check (Evil Panda: "only deploy where fees justify the gas")
+  if (feeTvl != null && feeTvl < T.evilPandaMinFeeTvl) {
+    return {
+      strategy: "skip",
+      reason: `fee/TVL ${feeTvl?.toFixed(2)}% < ${T.evilPandaMinFeeTvl}% (Evil Panda: fees don't justify gas)`,
+      recommendation: "wait for better yield or skip",
+    };
+  }
+
+  // 4. Dead pool detection (age > 7 days with low volume)
+  if (ageHours != null && ageHours > T.evilPandaMaxAgeHours) {
+    if (volume != null && volume < 1000) {
+      return {
+        strategy: "skip",
+        reason: `token age ${ageHours?.toFixed(0)}h > ${T.evilPandaMaxAgeHours}h with volume $${volume?.toFixed(0)} (dead pool)`,
+        recommendation: "skip — token may be abandoned",
+      };
+    }
+    // Old but active = proceed with caution
+    return {
+      strategy: "bid_ask",
+      reason: `mature token (${ageHours?.toFixed(0)}h) with active volume — proceed with caution`,
+      bins_multiplier: 1.0, // standard bin range
+    };
+  }
+
+  // 5. Volatility-based bin range scaling (Evil Panda Fibonacci method)
+  // Higher volatility = wider bins = better survive dumps
+  let binsMultiplier = 1.0;
+  let rangeNote = "standard range";
+
+  if (volatility != null) {
+    if (volatility < 3) {
+      binsMultiplier = 0.8; // tighter range for stable pools
+      rangeNote = "tighter range (low volatility, stable pool)";
+    } else if (volatility >= 3 && volatility < 5) {
+      binsMultiplier = 1.0; // standard
+      rangeNote = "standard range (moderate volatility)";
+    } else if (volatility >= 5 && volatility < 8) {
+      binsMultiplier = 1.3; // wider
+      rangeNote = "wider range (high volatility, expect bigger moves)";
+    } else if (volatility >= 8) {
+      binsMultiplier = 1.5; // maximum
+      rangeNote = "maximum range (very high volatility, survive big dumps)";
+    }
+  }
+
+  // 6. Fee/TVL sweet spot bonus
+  let qualityScore = "standard";
+  if (feeTvl != null && feeTvl >= 8) {
+    qualityScore = "excellent";
+  } else if (feeTvl != null && feeTvl >= 5) {
+    qualityScore = "good";
+  } else if (feeTvl != null && feeTvl >= 3) {
+    qualityScore = "acceptable";
+  }
+
+  // ─── Final Decision: ALWAYS bid_ask for small wallet Evil Panda ───
+  // Legacy logic below is kept for reference but effectively bypassed
+  // because bid_ask is the only viable strategy for single-sided SOL.
+  
+  return {
+    strategy: "bid_ask",
+    reason: `Evil Panda: vol=${volatility?.toFixed(1) ?? "unknown"}, fee/TVL=${feeTvl?.toFixed(1) ?? "unknown"}%, age=${ageHours?.toFixed(0) ?? "unknown"}h — ${rangeNote}`,
+    bins_multiplier: binsMultiplier,
+    quality: qualityScore,
+    // Guidance for LLM on bin sizing
+    recommended_bins_below: Math.round(50 * binsMultiplier),
+    notes: `Single-sided SOL bid_ask. Capture fees on dumps, survive volatility. Quality: ${qualityScore}`,
+  };
 }
 
 function shouldUsePnlRecheck() {

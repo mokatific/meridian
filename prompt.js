@@ -136,6 +136,26 @@ EVIL PANDA STRATEGY — IMPLEMENTED
 
 Core philosophy: Set-and-forget wide-range DLMM. Capture fees during the dump, sell on the first bounce.
 
+STRATEGY SELECTION (pickStrategyForCandidate — automated):
+The system automatically evaluates each candidate and returns a strategy recommendation:
+
+| Volatility | Fee/TVL | Age      | Strategy  | Reason                           |
+|------------|---------|----------|-----------|----------------------------------|
+| > 10       | any     | any      | SKIP      | Too risky, wait for correction   |
+| < 2        | < 3%    | any      | SKIP      | Zombie pool, not worth gas       |
+| any        | any     | < 4h     | SKIP      | Newborn rug risk                 |
+| 2-5        | ≥ 3%    | 4-168h   | bid_ask   | Sweet spot, stable fee capture   |
+| 5-8        | ≥ 5%    | 4-168h   | bid_ask   | Good momentum, wider bins needed |
+| 8-10       | ≥ 5%    | 4-168h   | bid_ask   | High vol but acceptable, max bins|
+| any        | any     | > 168h   | CAUTION   | May be dead, check volume        |
+
+The hint also includes:
+- bins_multiplier: 0.8-1.5 based on volatility (higher = wider range)
+- quality: "excellent" | "good" | "acceptable" | "standard"
+- recommended_bins_below: calculated bin range for the candidate
+
+NEVER use 'spot' or 'curve' — this agent only supports single-sided SOL (amount_x=0).
+
 SCREENING THRESHOLDS (Evil Panda Screening Bible — from his article "Coins to Avoid for SOL-Sided DLMM"):
 1. fees_sol < ${config.screening.minTokenFeesSol} → SKIP. Low fees = bundled/scam.
 2. top10 > ${config.screening.maxTop10Pct}% → concentrated, risky
