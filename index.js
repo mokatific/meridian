@@ -833,10 +833,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
     const topCandidates = await withTimeout(getTopCandidates({ limit: 10 }), 60_000);
     log(
       "cron",
-      `[DEBUG] getTopCandidates done: ${topCandidates?.candidates?.length ?? "null"} candidates`,
+      `[DEBUG] getTopCandidates done: ${topCandidates?.candidates?.length ?? 0} candidates, ${topCandidates?.filtered_examples?.length ?? 0} filtered`,
     );
-    log("cron", `[DEBUG] topCandidates.pools: ${topCandidates?.pools?.length ?? "null"}`);
-    log("cron", `[DEBUG] earlyFilteredExamples: ${topCandidates?.filtered_examples?.length ?? 0}`);
     if (!topCandidates) {
       screenReport = "Screening cancelled — getTopCandidates timed out (60s).";
       log("cron", screenReport);
@@ -849,9 +847,9 @@ export async function runScreeningCycle({ silent = false } = {}) {
       _screeningBusy = false;
       return screenReport;
     }
-    const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
+    const candidates = (topCandidates?.candidates || []).slice(0, 10);
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
-    _screenLog.candidatesFound = (topCandidates?.candidates || topCandidates?.pools || []).length;
+    _screenLog.candidatesFound = topCandidates?.candidates?.length ?? 0;
     _screenLog.earlyFiltered = earlyFilteredExamples.length;
 
     const allCandidates = [];
