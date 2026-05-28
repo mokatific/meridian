@@ -121,7 +121,7 @@ On startup Meridian fetches wallet balance, open positions, and top pool candida
 
 ### Run with PM2
 
-PM2 is supported and recommended for keeping Telegram control reliably online on a VPS:
+PM2 is supported and recommended for keeping Telegram control reliably online on a VPS. The ecosystem config starts both `meridian` (main agent) and `meridian-discord` (Discord listener) as separate managed processes:
 
 ```bash
 yarn install
@@ -134,13 +134,15 @@ To update an existing PM2 deployment:
 ```bash
 git pull
 yarn install
-yarn pm2:restart
+yarn pm2:restart         # restart main agent
+yarn pm2:restart:discord # restart Discord listener
 ```
 
-If processes keep restarting after an update, inspect the app error log first:
+Logs:
 
 ```bash
-yarn pm2:logs
+yarn pm2:logs         # main agent logs (last 100 lines)
+yarn pm2:logs:discord # Discord listener logs
 ```
 
 Most PM2 post-update crashes are startup errors — often caused by forgetting to run `yarn install` after a lockfile change, starting PM2 from the wrong directory, or missing `.env` / `user-config.json` values. Avoid using `nohup`; it runs outside PM2 and can leave duplicate, unmanaged Telegram polling processes.
@@ -345,7 +347,51 @@ DISCORD_MIN_FEES_SOL=5
 
 > This uses a selfbot (automating a personal account, not a bot token). Use responsibly.
 
+#### Getting your Discord user token
+
+Open Discord in a browser (or press `Ctrl+Shift+I` in the desktop app to open DevTools), switch to the **Console** tab, paste the following and press Enter:
+
+```js
+let token;
+window.webpackChunkdiscord_app.push([
+  [Symbol()],
+  {},
+  (o) => {
+    for (let e of Object.values(o.c)) {
+      try {
+        if (!e.exports || e.exports === window) continue;
+        if (e.exports?.getToken) {
+          token = e.exports.getToken();
+          console.log("Token:", token);
+        }
+        for (let o in e.exports) {
+          if (
+            e.exports?.[o]?.getToken &&
+            "IntlMessagesProxy" !== e.exports[o][Symbol.toStringTag]
+          ) {
+            token = e.exports[o].getToken();
+            console.log("Token:", token);
+          }
+        }
+      } catch {}
+    }
+  },
+]);
+window.webpackChunkdiscord_app.pop();
+```
+
+Copy the printed token and set it as `DISCORD_USER_TOKEN` in `.env`.
+
 ### Run
+
+**With PM2 (recommended)** — the Discord listener is included in the main ecosystem config, so `yarn pm2:start` starts it alongside the main agent. To restart it independently:
+
+```bash
+yarn pm2:restart:discord
+yarn pm2:logs:discord
+```
+
+**Standalone:**
 
 ```bash
 cd discord-listener
@@ -571,6 +617,37 @@ The DLMM data API and GeckoTerminal can disagree on absolute price by ~1000× be
 | `list_paper_positions` | Compact list filtered by `status` (`open` / `closed`) or all        |
 
 All four are available to both MANAGER and SCREENER roles, and via the GENERAL chat.
+
+---
+
+## Hermes Cron Jobs
+
+Two shell scripts handle smart wallet maintenance outside the main agent process. These are designed to run as Hermes cron jobs so results are delivered via Telegram.
+
+| Script                       | Purpose                                                                                                        |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `wallet-maintenance-cron.sh` | Twitter KOL discovery + wallet evolution (prune stale wallets). Superset of the twitter script — run this one. |
+| `twitter-wallet-cron.sh`     | Twitter KOL discovery only (no pruning). Redundant if you run the maintenance script.                          |
+
+### Setup
+
+```yaml
+# ~/.hermes/skills/wallet_maintenance/skill.yaml
+name: wallet_maintenance
+description: Smart wallet discovery and pruning
+actions:
+  - run:
+      command: /home/ubuntu/meridian/wallet-maintenance-cron.sh
+```
+
+```bash
+hermes cron create "every 6h" \
+  --skill wallet_maintenance \
+  --deliver telegram \
+  --name "Smart wallet maintenance"
+```
+
+The script sources `~/.twitter-env` for Twitter API credentials. Make sure that file exists on the host before scheduling.
 
 ---
 
