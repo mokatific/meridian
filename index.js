@@ -1172,14 +1172,21 @@ IMPORTANT:
       screeningController,
     );
     if (!agentResult) {
-      screenReport = "⛔ Screening cancelled — agent loop timed out (600s).";
-      log("cron", screenReport);
-      appendDecision({
-        type: "skip",
-        actor: "SCREENER",
-        summary: "Screening cancelled",
-        reason: "agent loop timed out",
-      });
+      // Timeout fired — but a deploy tool call may have been in-flight and completed
+      // after the abort signal. Check deploySucceeded before reporting failure.
+      if (deploySucceeded) {
+        screenReport = "⚠️ Screening cycle timed out but a deploy completed before abort.";
+        log("cron", screenReport);
+      } else {
+        screenReport = "⛔ Screening cancelled — agent loop timed out (600s).";
+        log("cron", screenReport);
+        appendDecision({
+          type: "skip",
+          actor: "SCREENER",
+          summary: "Screening cancelled",
+          reason: "agent loop timed out",
+        });
+      }
       _screeningBusy = false;
       return screenReport;
     }
