@@ -60,6 +60,7 @@
   "outOfRangeWaitMinutes": 20,
   "oorCooldownTriggerCount": 2,
   "oorCooldownHours": 18,
+  "lowYieldCooldownHours": 6,
   "repeatDeployCooldownEnabled": true,
   "repeatDeployCooldownTriggerCount": 2,
   "repeatDeployCooldownHours": 18,

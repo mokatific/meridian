@@ -169,7 +169,7 @@ export function recordPoolDeploy(poolAddress, deployData) {
 
   // Set cooldown for low yield closes — pool wasn't profitable enough, don't redeploy soon
   if (deploy.close_reason === "low yield") {
-    const cooldownHours = 4;
+    const cooldownHours = Math.max(0, Number(config.management.lowYieldCooldownHours ?? 4));
     const cooldownUntil = setPoolCooldown(entry, cooldownHours, "low yield");
     log("pool-memory", `Cooldown set for ${entry.name} until ${cooldownUntil} (low yield close)`);
   }
