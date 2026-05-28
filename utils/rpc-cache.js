@@ -143,6 +143,92 @@ function computeBackoffMs(err, attempt) {
   return Math.min(delay + jitter, RPC_RETRY_CAP_MS);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeConfirmTransactionArgs(args) {
+  const [firstArg, secondArg] = args;
+  let signature = null;
+  let commitment = "confirmed";
+  let abortSignal = null;
+  let lastValidBlockHeight = null;
+
+  if (typeof firstArg === "string") {
+    signature = firstArg;
+    if (typeof secondArg === "string") {
+      commitment = secondArg;
+    } else if (secondArg && typeof secondArg === "object") {
+      commitment = secondArg.commitment ?? commitment;
+      abortSignal = secondArg.abortSignal ?? null;
+      lastValidBlockHeight = secondArg.lastValidBlockHeight ?? null;
+    }
+    return { signature, commitment, abortSignal, lastValidBlockHeight };
+  }
+
+  if (firstArg && typeof firstArg === "object") {
+    signature = firstArg.signature ?? firstArg.signatures?.[0] ?? null;
+    commitment = firstArg.commitment ?? commitment;
+    abortSignal = firstArg.abortSignal ?? null;
+    lastValidBlockHeight = firstArg.lastValidBlockHeight ?? null;
+
+    if (typeof secondArg === "string") {
+      commitment = secondArg;
+    } else if (secondArg && typeof secondArg === "object") {
+      commitment = secondArg.commitment ?? commitment;
+      abortSignal = secondArg.abortSignal ?? abortSignal;
+    }
+  }
+
+  return { signature, commitment, abortSignal, lastValidBlockHeight };
+}
+
+async function confirmTransactionByPolling(conn, ...args) {
+  const { signature, commitment, abortSignal, lastValidBlockHeight } =
+    normalizeConfirmTransactionArgs(args);
+
+  if (!signature) {
+    throw new Error("confirmTransaction requires a signature");
+  }
+
+  const timeoutMs = Number(process.env.RPC_CONFIRM_TIMEOUT_MS || 120000);
+  const startedAt = Date.now();
+  let delayMs = 500;
+
+  while (true) {
+    if (abortSignal?.aborted) {
+      throw new Error(`Transaction confirmation aborted for ${signature}`);
+    }
+
+    const response = await conn.getSignatureStatuses([signature], {
+      searchTransactionHistory: true,
+    });
+    const status = response?.value?.[0] ?? null;
+
+    if (status?.err) {
+      const failureReason =
+        typeof status.err === "string" ? status.err : JSON.stringify(status.err);
+      throw new Error(`Transaction ${signature} failed: ${failureReason}`);
+    }
+
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") {
+      return response;
+    }
+
+    if (lastValidBlockHeight != null) {
+      const currentBlockHeight = await conn.getBlockHeight(commitment);
+      if (currentBlockHeight > lastValidBlockHeight) {
+        throw new Error(`Signature ${signature} has expired: block height exceeded.`);
+      }
+    } else if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Timed out waiting for confirmation of signature ${signature}`);
+    }
+
+    await sleep(delayMs);
+    delayMs = Math.min(Math.round(delayMs * 1.5), 2000);
+  }
+}
+
 /**
  * Create a cached Connection with automatic failover.
  * Primary: RPC_URL (Alchemy), Fallback: RPC_URL_FALLBACK (Helius)
@@ -319,6 +405,11 @@ export function createCachedConnection(rpcUrl, commitmentOrConfig = "confirmed")
         };
       }
 
+      if (prop === "confirmTransaction") {
+        return async (...args) =>
+          withFailover((conn) => confirmTransactionByPolling(conn, ...args));
+      }
+
       // Non-cached methods: still get failover
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") {
@@ -326,9 +417,9 @@ export function createCachedConnection(rpcUrl, commitmentOrConfig = "confirmed")
         const rpcMethods = [
           "sendTransaction",
           "sendRawTransaction",
-          "confirmTransaction",
           "simulateTransaction",
           "getLatestBlockhash",
+          "getBlockHeight",
           "getSlot",
           "getMinimumBalanceForRentExemption",
           "getSignatureStatuses",
@@ -354,6 +445,47 @@ export function createCachedConnection(rpcUrl, commitmentOrConfig = "confirmed")
  */
 export function getRpcCacheStats() {
   return { ..._cache.stats, usingFallback: _usingFallback, failoverCount: _failoverCount };
+}
+
+/**
+ * Drop-in replacement for @solana/web3.js sendAndConfirmTransaction that
+ * uses HTTP polling instead of WebSocket signatureSubscribe.
+ * Helius (and many other RPC providers) don't expose signatureSubscribe on
+ * their HTTP endpoint, so the web3.js version throws -32601 errors and the
+ * transaction appears to fail even though it landed on-chain.
+ */
+export async function sendAndConfirmPolling(connection, transaction, signers, opts = {}) {
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
+    opts.commitment ?? "confirmed",
+  );
+
+  let rawTx;
+  if (transaction.message && typeof transaction.sign === "function" && !transaction.instructions) {
+    // VersionedTransaction
+    transaction.message.recentBlockhash = blockhash;
+    transaction.sign(signers);
+    rawTx = transaction.serialize();
+  } else {
+    // Legacy Transaction
+    transaction.recentBlockhash = blockhash;
+    transaction.lastValidBlockHeight = lastValidBlockHeight;
+    transaction.feePayer ??= signers[0].publicKey;
+    transaction.sign(...signers);
+    rawTx = transaction.serialize();
+  }
+
+  const signature = await connection.sendRawTransaction(rawTx, {
+    skipPreflight: opts.skipPreflight ?? false,
+    preflightCommitment: opts.preflightCommitment ?? "confirmed",
+    maxRetries: opts.maxRetries ?? 3,
+  });
+
+  await confirmTransactionByPolling(connection, signature, {
+    commitment: opts.commitment ?? "confirmed",
+    lastValidBlockHeight,
+  });
+
+  return signature;
 }
 
 /**
