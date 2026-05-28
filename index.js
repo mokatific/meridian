@@ -2217,6 +2217,9 @@ async function deployLatestCandidate(index) {
     // Pass the token narrative along so downstream notifiers can include it
     narrative: candidate.narrative ?? null,
   });
+  if (result?.blocked) {
+    throw new Error(`Deploy blocked: ${result.reason || "safety check failed"}`);
+  }
   if (result?.success === false || result?.error) {
     throw new Error(result.error || "Deploy failed");
   }
