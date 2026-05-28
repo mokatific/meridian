@@ -37,12 +37,14 @@ const DEFAULT_STRATEGIES = {
       min_volatility: 2,
       max_volatility: 10,
       min_fee_tvl_pct: 3,
-      notes: "Filter 99% of launches. Only 1-2 coins/day should survive. Avoid newborns, dead pools, and extreme volatility.",
+      notes:
+        "Filter 99% of launches. Only 1-2 coins/day should survive. Avoid newborns, dead pools, and extreme volatility.",
     },
     entry: {
       condition: "Single-sided SOL deposit below active bin",
       single_side: "sol",
-      notes: "amount_y only, amount_x=0, bins_above=0. All liquidity sits below current price to capture fees on dumps.",
+      notes:
+        "amount_y only, amount_x=0, bins_above=0. All liquidity sits below current price to capture fees on dumps.",
     },
     range: {
       type: "volatility_scaled",
@@ -51,16 +53,19 @@ const DEFAULT_STRATEGIES = {
       bins_multiplier_mid_vol: 1.0, // vol 3-5
       bins_multiplier_high_vol: 1.3, // vol 5-8
       bins_multiplier_extreme_vol: 1.5, // vol 8-10
-      notes: "Higher volatility = wider bins. Fibonacci-based range scaling. Never deploy with bins_below < 35.",
+      notes:
+        "Higher volatility = wider bins. Fibonacci-based range scaling. Never deploy with bins_below < 35.",
     },
     exit: {
       stop_loss_pct: -20,
       take_profit_pct: 40,
       trailing_trigger_pct: 1.2,
       trailing_drop_pct: 1.5,
-      notes: "Going OOR is NOT an exit signal. Wait for recovery pump. Exit on RSI(2)>90 + BB break confluence. Wide SL survives -95% drops.",
+      notes:
+        "Going OOR is NOT an exit signal. Wait for recovery pump. Exit on RSI(2)>90 + BB break confluence. Wide SL survives -95% drops.",
     },
-    best_for: "Small wallets (< 2 SOL). Set-and-forget wide-range DLMM. Capture fees during dumps, sell on first bounce. One good trade does the work.",
+    best_for:
+      "Small wallets (< 2 SOL). Set-and-forget wide-range DLMM. Capture fees during dumps, sell on first bounce. One good trade does the work.",
     raw: "Evil Panda: 'Filtering 99% of launches isn't pessimism, it's discipline. Size your winners, let one good trade do the work.'",
   },
   custom_ratio_spot: {

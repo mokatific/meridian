@@ -191,7 +191,7 @@ function pickStrategyForCandidate(pool, tokenInfo, activeStrategy) {
   // ─── Evil Panda Strategy Selection ─────────────────────────────────
   // Core philosophy: Single-sided SOL bid_ask, survive the dump, sell on bounce.
   // Small wallets (under 2 SOL) should ALWAYS use bid_ask for gas efficiency.
-  // 
+  //
   // Decision matrix based on pool characteristics:
   //
   // | Volatility | Fee/TVL | Age      | Strategy  | Reason                           |
@@ -299,7 +299,7 @@ function pickStrategyForCandidate(pool, tokenInfo, activeStrategy) {
   // ─── Final Decision: ALWAYS bid_ask for small wallet Evil Panda ───
   // Legacy logic below is kept for reference but effectively bypassed
   // because bid_ask is the only viable strategy for single-sided SOL.
-  
+
   return {
     strategy: "bid_ask",
     reason: `Evil Panda: vol=${volatility?.toFixed(1) ?? "unknown"}, fee/TVL=${feeTvl?.toFixed(1) ?? "unknown"}%, age=${ageHours?.toFixed(0) ?? "unknown"}h — ${rangeNote}`,
@@ -2134,8 +2134,19 @@ async function deployLatestCandidate(index) {
     }
   }
   const deployAmount = computeDeployAmount((await getWalletBalances()).sol);
-  const binsBelow = computeBinsBelow(candidate.volatility);
-  const hintedStrategy = candidate?._strategy_hint?.strategy || null;
+  const strategyHint = candidate?._strategy_hint || {};
+  const binsMultiplier = strategyHint.bins_multiplier ?? 1.0;
+  const binsBelow = computeBinsBelow(candidate.volatility, binsMultiplier);
+  const hintedStrategy = strategyHint.strategy || null;
+  if (strategyHint.strategy === "skip") {
+    throw new Error(
+      `NO DEPLOY: ${strategyHint.reason}. ${strategyHint.recommendation ?? "Skip and move on."}`,
+    );
+  }
+  log(
+    "cron",
+    `[STRATEGY] bins_multiplier=${binsMultiplier}, bins_below=${binsBelow} (vol=${candidate.volatility}, quality=${strategyHint.quality ?? "n/a"})`,
+  );
   const result = await executeTool("deploy_position", {
     pool_address: candidate.pool,
     amount_y: deployAmount,
@@ -2798,7 +2809,7 @@ function getLoneCandidateSkipReason({ pool, sw, n, ti } = {}) {
   return null;
 }
 
-function computeBinsBelow(volatility) {
+function computeBinsBelow(volatility, multiplier = 1.0) {
   const parsedVolatility = Number(volatility);
   if (!Number.isFinite(parsedVolatility) || parsedVolatility <= 0) {
     throw new Error(
@@ -2807,7 +2818,15 @@ function computeBinsBelow(volatility) {
   }
   const lo = config.strategy.minBinsBelow;
   const hi = config.strategy.maxBinsBelow;
-  return Math.max(lo, Math.min(hi, Math.round(lo + (parsedVolatility / 5) * (hi - lo))));
+  // Fibonacci-scaled multiplier tiers (Evil Panda method)
+  let effectiveMultiplier = multiplier;
+  if (parsedVolatility < 2) effectiveMultiplier = Math.min(multiplier, 0.8);
+  else if (parsedVolatility < 5) effectiveMultiplier = Math.min(multiplier, 1.0);
+  else if (parsedVolatility < 8) effectiveMultiplier = Math.min(multiplier, 1.3);
+  else effectiveMultiplier = Math.min(multiplier, 1.5);
+  const ceiling = Math.round(hi * 1.5); // allow wider range for extreme volatility
+  const base = Math.round(lo + (parsedVolatility / 5) * (hi - lo));
+  return Math.max(lo, Math.min(ceiling, Math.round(base * effectiveMultiplier)));
 }
 
 // Register restarter — when update_config changes intervals, running cron jobs get replaced
