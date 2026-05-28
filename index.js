@@ -878,7 +878,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
         mem: recallForPool(pool.pool),
       });
       log("cron", `[DEBUG] Recon done for ${pool.name}`);
-      await new Promise((r) => setTimeout(r, 500)); // avoid RPC 429s — serialized recon needs breathing room
+      await new Promise((r) => setTimeout(r, 800)); // avoid API 429s — serialized recon needs breathing room
     }
 
     // Hard filters after token recon — block launchpads and excessive Jupiter bot holders
@@ -971,9 +971,16 @@ export async function runScreeningCycle({ silent = false } = {}) {
     setLatestCandidates(passing.map(({ pool }) => pool));
 
     // Pre-fetch active_bin for all passing candidates in parallel
-    const activeBinResults = await Promise.allSettled(
-      passing.map(({ pool }) => getActiveBin({ pool_address: pool.pool })),
-    );
+    // Fetch active bins sequentially with a small delay to avoid RPC 429s
+    const activeBinResults = [];
+    for (const { pool } of passing) {
+      const result = await getActiveBin({ pool_address: pool.pool }).then(
+        (v) => ({ status: "fulfilled", value: v }),
+        (e) => ({ status: "rejected", reason: e }),
+      );
+      activeBinResults.push(result);
+      await new Promise((r) => setTimeout(r, 200));
+    }
 
     // Build compact candidate blocks
     const candidateBlocks = passing.map(({ pool, sw, n, ti, mem }, i) => {
