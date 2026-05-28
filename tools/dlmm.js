@@ -489,6 +489,9 @@ export async function getActiveBin({ pool_address }) {
   };
 }
 
+// ─── Deploy mutex — prevents parallel deploys from racing past maxPositions ──
+let _deployInProgress = false;
+
 // ─── Deploy Position ───────────────────────────────────────────
 export async function deployPosition({
   pool_address,
@@ -501,6 +504,59 @@ export async function deployPosition({
   downside_pct,
   upside_pct,
   // optional pool metadata for learning (passed by agent when available)
+  pool_name,
+  bin_step,
+  base_fee,
+  volatility,
+  fee_tvl_ratio,
+  organic_score,
+  initial_value_usd,
+}) {
+  // Mutex: block parallel deploys — Promise.all in agent.js runs tool calls concurrently,
+  // so without this, N simultaneous deploy calls all see 0 positions and all proceed.
+  if (_deployInProgress) {
+    log("deploy", "Deploy already in progress — rejecting parallel call");
+    return {
+      success: false,
+      blocked: true,
+      error: "Another deploy is already in progress. Only one position can be opened at a time.",
+    };
+  }
+  _deployInProgress = true;
+  try {
+    return await _deployPositionInner({
+      pool_address,
+      amount_sol,
+      amount_x,
+      amount_y,
+      strategy,
+      bins_below,
+      bins_above,
+      downside_pct,
+      upside_pct,
+      pool_name,
+      bin_step,
+      base_fee,
+      volatility,
+      fee_tvl_ratio,
+      organic_score,
+      initial_value_usd,
+    });
+  } finally {
+    _deployInProgress = false;
+  }
+}
+
+async function _deployPositionInner({
+  pool_address,
+  amount_sol,
+  amount_x,
+  amount_y,
+  strategy,
+  bins_below,
+  bins_above,
+  downside_pct,
+  upside_pct,
   pool_name,
   bin_step,
   base_fee,
