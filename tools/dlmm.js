@@ -546,6 +546,24 @@ export async function deployPosition({
         "Token on cooldown — recently closed out-of-range too many times. Try a different token.",
     };
   }
+
+  // Hard position-count guard — fetch live count to catch parallel deploy calls
+  // that bypass the agent-level ONCE_PER_SESSION lock (e.g. multiple tool calls in one LLM step)
+  if (process.env.DRY_RUN !== "true") {
+    const live = await getMyPositions({ force: true, silent: true }).catch(() => null);
+    const liveCount = live?.total_positions ?? 0;
+    if (liveCount >= config.risk.maxPositions) {
+      log(
+        "deploy",
+        `Deploy blocked — already at max positions (${liveCount}/${config.risk.maxPositions})`,
+      );
+      return {
+        success: false,
+        blocked: true,
+        error: `Max positions reached (${liveCount}/${config.risk.maxPositions}). Close an existing position before deploying.`,
+      };
+    }
+  }
   const activeBin = await pool.getActiveBin();
   const actualBinStep = pool.lbPair.binStep;
   const activePrice = Number(getPriceOfBinByBinId(activeBin.binId, actualBinStep).toString());
