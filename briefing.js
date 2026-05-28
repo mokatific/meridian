@@ -1,6 +1,7 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { getPerformanceSummary } from "./lessons.js";
+import { getVirtualWalletSummary } from "./dry-run-simulator.js";
 
 const STATE_FILE = "./state.json";
 const LESSONS_FILE = "./lessons.json";
@@ -68,6 +69,18 @@ export async function generateBriefing() {
     perfSummary
       ? `📊 All-time PnL: $${perfSummary.total_pnl_usd.toFixed(2)} (${perfSummary.win_rate_pct}% win)`
       : "",
+    ...(process.env.DRY_RUN === "true"
+      ? (() => {
+          try {
+            const w = getVirtualWalletSummary();
+            return [
+              `🧪 Virtual Wallet: ${w.balance.toFixed(3)} SOL / ${w.initial.toFixed(3)} SOL (${w.netPnlPct >= 0 ? "+" : ""}${w.netPnlPct}%)`,
+            ];
+          } catch {
+            return [];
+          }
+        })()
+      : []),
     "────────────────",
   ];
 

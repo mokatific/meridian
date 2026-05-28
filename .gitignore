@@ -72,9 +72,10 @@ discord-signals.json
 .playwright-mcp/
 
 # ============================================
-# Claude Code runtime lock
+# Claude Code
 # ============================================
 .claude/scheduled_tasks.lock
+memory/
 
 # ============================================
 # Backup files

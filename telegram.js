@@ -676,13 +676,33 @@ export async function notifyDeploy({
   );
 }
 
-export async function notifyClose({ pair, pnlUsd, pnlPct, reason }) {
+export async function notifyClose({
+  pair,
+  pnlUsd,
+  pnlPct,
+  reason,
+  feesUsd,
+  minutesHeld,
+  priceChangePct,
+  dryRun,
+}) {
   if (hasActiveLiveMessage()) return;
   const sign = pnlUsd >= 0 ? "+" : "";
   const reasonLine = reason ? `Reason: ${reason}\n` : "";
+  const feesLine = feesUsd != null ? `Fees earned: $${feesUsd.toFixed(3)}\n` : "";
+  const holdLine = minutesHeld != null ? `Held: ${minutesHeld}m\n` : "";
+  const priceChangeLine =
+    priceChangePct != null
+      ? `Price Δ: ${priceChangePct >= 0 ? "+" : ""}${priceChangePct.toFixed(1)}%\n`
+      : "";
+  const icon = dryRun ? "🧪" : "🔒";
+  const label = dryRun ? "Closed (DRY RUN)" : "Closed";
   await sendHTML(
-    `🔒 <b>Closed</b> ${pair}\n` +
+    `${icon} <b>${label}</b> ${pair}\n` +
       `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)\n` +
+      feesLine +
+      holdLine +
+      priceChangeLine +
       reasonLine,
   );
 }

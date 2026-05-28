@@ -21,6 +21,7 @@ import {
   editMessageWithButtons,
   answerCallbackQuery,
   notifyOutOfRange,
+  notifyClose,
   isEnabled as telegramEnabled,
   createLiveMessage,
 } from "./telegram.js";
@@ -405,6 +406,7 @@ async function maybeRunMissedBriefing() {
 function stopCronJobs() {
   for (const task of _cronTasks) task.stop();
   if (_cronTasks._pnlPollInterval) clearInterval(_cronTasks._pnlPollInterval);
+  if (_cronTasks._virtualPollInterval) clearInterval(_cronTasks._virtualPollInterval);
   _cronTasks = [];
 }
 
@@ -425,20 +427,28 @@ export async function runManagementCycle({ silent = false } = {}) {
 
     // ── Dry Run Simulator — evaluate virtual positions ────────────
     if (process.env.DRY_RUN === "true") {
-      evaluateVirtualPositions()
-        .then((closes) => {
-          if (closes.length > 0) {
-            const lines = closes.map(
-              (c) =>
-                `📊 [SIM] ${c.pool_name}: ${c.pnl_pct >= 0 ? "+" : ""}${c.pnl_pct}% (${c.reason?.split(":")[0]})`,
-            );
-            log("simulator", `Virtual closes this cycle: ${closes.length}`);
+      try {
+        const closes = await evaluateVirtualPositions();
+        if (closes.length > 0) {
+          log("simulator", `Virtual closes this cycle: ${closes.length}`);
+          for (const c of closes) {
             if (telegramEnabled()) {
-              sendMessage(`🎮 Dry Run Simulator\n\n${lines.join("\n")}`).catch(() => {});
+              notifyClose({
+                pair: c.pool_name,
+                pnlUsd: c.pnl_usd,
+                pnlPct: c.pnl_pct,
+                reason: c.reason,
+                feesUsd: c.fees_usd,
+                minutesHeld: c.minutes_held,
+                priceChangePct: c.price_change_pct,
+                dryRun: true,
+              }).catch(() => {});
             }
           }
-        })
-        .catch((e) => log("simulator_warn", `Virtual evaluation error: ${e.message}`));
+        }
+      } catch (e) {
+        log("simulator_warn", `Virtual evaluation error: ${e.message}`);
+      }
     }
 
     const livePositions = await getMyPositions({ force: true }).catch(() => null);
@@ -1448,6 +1458,48 @@ Summarize the current portfolio health, total fees earned, and performance of al
     }
   }, 30_000);
 
+  // 30s virtual PnL poller — dry run equivalent of the live poller above.
+  // Fetches RPC price for each open virtual position and triggers management
+  // if an exit rule fires, so dry-run positions close as fast as live ones.
+  let _virtualPollBusy = false;
+  const virtualPollInterval =
+    process.env.DRY_RUN === "true"
+      ? setInterval(async () => {
+          if (_managementBusy || _screeningBusy || _virtualPollBusy) return;
+          if (getTrackedPositions(true).length === 0) return;
+          _virtualPollBusy = true;
+          try {
+            const closes = await evaluateVirtualPositions();
+            if (closes.length > 0) {
+              log("simulator", `[virtual poll] ${closes.length} virtual close(s) triggered`);
+              for (const c of closes) {
+                if (telegramEnabled()) {
+                  notifyClose({
+                    pair: c.pool_name,
+                    pnlUsd: c.pnl_usd,
+                    pnlPct: c.pnl_pct,
+                    reason: c.reason,
+                    feesUsd: c.fees_usd,
+                    minutesHeld: c.minutes_held,
+                    priceChangePct: c.price_change_pct,
+                    dryRun: true,
+                  }).catch(() => {});
+                }
+              }
+              if (getTrackedPositions(true).length === 0) {
+                runScreeningCycle().catch((e) =>
+                  log("cron_error", `Post-virtual-close screening failed: ${e.message}`),
+                );
+              }
+            }
+          } catch (e) {
+            log("simulator_warn", `Virtual poll error: ${e.message}`);
+          } finally {
+            _virtualPollBusy = false;
+          }
+        }, 30_000)
+      : null;
+
   // Wallet Evolution — independent cron, configurable schedule
   // Default: "0 */2 * * *" (every 2h at :00). Live bots can set "30 1-23/2 * * *" (odd hours +30m)
   let _walletEvoBusy = false;
@@ -1519,8 +1571,9 @@ Summarize the current portfolio health, total fees earned, and performance of al
     walletEvoTask,
     paperTickTask,
   ];
-  // Store interval ref so stopCronJobs can clear it
+  // Store interval refs so stopCronJobs can clear them
   _cronTasks._pnlPollInterval = pnlPollInterval;
+  if (virtualPollInterval) _cronTasks._virtualPollInterval = virtualPollInterval;
   log(
     "cron",
     `Cycles started — management every ${config.schedule.managementIntervalMin}m, screening every ${config.schedule.screeningIntervalMin}m${offsetMin > 0 ? ` (offset +${offsetMin}m)` : ""}, wallet evo: ${walletEvoCronExpr}`,
@@ -2510,6 +2563,10 @@ async function telegramHandler(msg) {
   }
 
   if (text === "/sim") {
+    // Refresh live PnL snapshots before displaying
+    if (process.env.DRY_RUN === "true") {
+      await evaluateVirtualPositions().catch(() => {});
+    }
     await sendMessage(getVirtualSummary()).catch(() => {});
     return;
   }

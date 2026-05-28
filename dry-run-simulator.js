@@ -25,6 +25,7 @@ import { addToBlacklist } from "./token-blacklist.js";
 import { blockDev } from "./dev-blocklist.js";
 import { addPoolNote } from "./pool-memory.js";
 import { appendDecision } from "./decision-log.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = path.join(__dirname, "state.json");
@@ -61,6 +62,29 @@ async function _getSolPrice() {
   _cachedSolPrice = config.management?.solPrice ?? 85;
   _solPriceFetchedAt = now;
   return _cachedSolPrice;
+}
+
+// ─── RPC real-time token price via Meteora pool state ─────────
+// Reads the active bin price directly from the DLMM pool account on-chain.
+// This is the same price the live position tracker uses — no API latency.
+const _rpcPriceCache = new Map(); // pool_address → { price, fetchedAt }
+const RPC_PRICE_TTL = 25_000; // 25s — slightly under the 30s poller interval
+
+async function _getRpcPoolPrice(poolAddress) {
+  const cached = _rpcPriceCache.get(poolAddress);
+  if (cached && Date.now() - cached.fetchedAt < RPC_PRICE_TTL) return cached.price;
+  try {
+    const { getActiveBin } = await import("./tools/dlmm.js");
+    const result = await getActiveBin({ pool_address: poolAddress });
+    if (result?.price != null && Number.isFinite(Number(result.price))) {
+      const price = Number(result.price);
+      _rpcPriceCache.set(poolAddress, { price, fetchedAt: Date.now() });
+      return price;
+    }
+  } catch {
+    /* fall through to API */
+  }
+  return null;
 }
 
 // ─── State helpers ─────────────────────────────────────────────
@@ -200,6 +224,9 @@ export async function evaluateVirtualPositions() {
           pnl_usd: evaluation.pnl_usd,
           fees_usd: evaluation.fees_usd,
           minutes_held: evaluation.minutes_held,
+          price_change_pct: evaluation.price_change_pct,
+          price_source: evaluation.price_source,
+          in_range: evaluation.in_range,
         });
       } else {
         // Reload state fresh to avoid stale reference
@@ -220,6 +247,17 @@ export async function evaluateVirtualPositions() {
         } else if (evaluation.in_range && freshPos.out_of_range_since) {
           freshPos.out_of_range_since = null;
         }
+        // Store live snapshot for /sim display
+        freshPos._live = {
+          pnl_pct: evaluation.pnl_pct,
+          pnl_usd: evaluation.pnl_usd,
+          fees_usd: evaluation.fees_usd,
+          price_change_pct: evaluation.price_change_pct,
+          price_source: evaluation.price_source,
+          in_range: evaluation.in_range,
+          fee_tvl_ratio: evaluation.fee_tvl_ratio,
+          updated_at: new Date().toISOString(),
+        };
         saveState(freshState);
       }
     } catch (err) {
@@ -258,34 +296,35 @@ async function _evaluatePosition(pos) {
 
   // ── Price change estimation ───────────────────────────────────
   // Priority:
-  // 1. Real price change from initial_price (stored at deploy) to current price from API
-  // 2. price_change_pct from pool API (last 5m change) as fallback
-  // 3. stats_1h.price_change if available
-  // 4. Simulation as last resort (biased toward realistic behavior)
+  // 1. RPC active-bin price (real-time, same source as live position tracker)
+  // 2. API pool price vs initial_price (stored at deploy)
+  // 3. price_change_pct from pool API (last 5m period)
+  // 4. stats_1h.price_change
+  // 5. Simulation as last resort
   let priceChangePct = 0;
   let priceSource = "none";
-
-  // Try to get current price from pool and compute real price change since open
-  const currentPoolPrice = poolData?.price;
   const initialPrice = pos.initial_price;
 
-  if (currentPoolPrice != null && initialPrice != null && initialPrice > 0) {
-    // Calculate real price change since position was opened
-    priceChangePct = ((currentPoolPrice - initialPrice) / initialPrice) * 100;
-    priceSource = "real_from_api";
-  } else if (poolData?.price_change_pct != null) {
-    // Fallback: use the API's price change (last 5m period)
-    priceChangePct = Number(poolData.price_change_pct);
-    priceSource = "api_5m";
-  } else if (poolData?.stats_1h?.price_change != null) {
-    priceChangePct = Number(poolData.stats_1h.price_change);
-    priceSource = "api_1h";
+  const rpcPrice = await _getRpcPoolPrice(pos.pool);
+  if (rpcPrice != null && initialPrice != null && initialPrice > 0) {
+    priceChangePct = ((rpcPrice - initialPrice) / initialPrice) * 100;
+    priceSource = "rpc";
   } else {
-    // Last resort: simulation with more realistic parameters
-    // Use pool's volatility to make simulation more accurate
-    const volatility = poolData?.volatility ?? pos.volatility ?? 2;
-    priceChangePct = _simulatePriceChange(pos, volatility, minutes_held, now);
-    priceSource = "simulation";
+    const currentPoolPrice = poolData?.price;
+    if (currentPoolPrice != null && initialPrice != null && initialPrice > 0) {
+      priceChangePct = ((currentPoolPrice - initialPrice) / initialPrice) * 100;
+      priceSource = "api";
+    } else if (poolData?.price_change_pct != null) {
+      priceChangePct = Number(poolData.price_change_pct);
+      priceSource = "api_5m";
+    } else if (poolData?.stats_1h?.price_change != null) {
+      priceChangePct = Number(poolData.stats_1h.price_change);
+      priceSource = "api_1h";
+    } else {
+      const volatility = poolData?.volatility ?? pos.volatility ?? 2;
+      priceChangePct = _simulatePriceChange(pos, volatility, minutes_held, now);
+      priceSource = "simulation";
+    }
   }
 
   // Clamp to reasonable bounds (can't lose more than 100% in single-sided LP)
@@ -701,7 +740,11 @@ export function getVirtualSummary() {
     lines.push(``, `Open virtual positions:`);
     open.forEach((p, i) => {
       const age = Math.floor((Date.now() - new Date(p.deployed_at).getTime()) / 60000);
-      lines.push(`${i + 1}. ${p.pool_name} | ${p.amount_sol} SOL | ${age}m old`);
+      const live = p._live;
+      const pnlStr = live
+        ? ` | PnL: ${live.pnl_pct >= 0 ? "+" : ""}${live.pnl_pct.toFixed(1)}% ($${live.pnl_usd >= 0 ? "+" : ""}${live.pnl_usd.toFixed(2)}) | fees: $${live.fees_usd.toFixed(3)} | ${live.in_range ? "IN" : "OOR"} | src: ${live.price_source}`
+        : "";
+      lines.push(`${i + 1}. ${p.pool_name} | ${p.amount_sol} SOL | ${age}m old${pnlStr}`);
     });
   }
 
