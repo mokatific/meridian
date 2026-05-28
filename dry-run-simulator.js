@@ -786,3 +786,32 @@ export function getVirtualWalletSummary() {
     netPnlPct: initial > 0 ? ((netPnl / initial) * 100).toFixed(1) : "0.0",
   };
 }
+
+/**
+ * Reset all virtual trading state back to initial balance.
+ * Clears open virtual positions, wallet ledger, and the closed-position archive.
+ * Use when changing config and wanting a clean slate for testing.
+ */
+export function resetVirtualTrading() {
+  const dryRunCfg = config.dryRun;
+  const initial = dryRunCfg.initialVirtualBalance;
+
+  // Clear virtual wallet fields and remove all virtual positions from state.json
+  const state = loadState();
+  for (const posId of Object.keys(state.positions ?? {})) {
+    if (state.positions[posId]?.virtual) {
+      delete state.positions[posId];
+    }
+  }
+  state.virtualSolBalance = initial;
+  state.virtualTotalDeployed = 0;
+  state.virtualTotalReturned = 0;
+  state.virtualTotalFees = 0;
+  saveState(state);
+
+  // Clear the closed-position archive
+  saveVirtualLog({ positions: [] });
+
+  log("simulator", `Virtual trading reset — balance restored to ${initial} SOL`);
+  return { reset: true, initialBalance: initial };
+}
