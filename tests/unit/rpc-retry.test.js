@@ -6,6 +6,9 @@ vi.mock("../../logger.js", () => ({ log: vi.fn() }));
 const mockState = vi.hoisted(() => ({
   callCount: 0,
   failuresRemaining: 0,
+  confirmationPolls: 0,
+  sentRawTxCount: 0,
+  txError: null,
 }));
 
 vi.mock("@solana/web3.js", () => {
@@ -24,6 +27,24 @@ vi.mock("@solana/web3.js", () => {
         lastValidBlockHeight: 123,
       };
     }
+    async getSignatureStatuses() {
+      mockState.confirmationPolls++;
+      if (mockState.txError) {
+        return { value: [{ confirmationStatus: "confirmed", err: mockState.txError }] };
+      }
+      return {
+        value: [
+          mockState.confirmationPolls >= 3 ? { confirmationStatus: "confirmed", err: null } : null,
+        ],
+      };
+    }
+    async getBlockHeight() {
+      return 100;
+    }
+    async sendRawTransaction(rawTx) {
+      mockState.sentRawTxCount++;
+      return "mock-signature-abc123";
+    }
   }
   return { Connection };
 });
@@ -35,6 +56,9 @@ beforeEach(() => {
   delete process.env.RPC_URL_FALLBACK;
   mockState.callCount = 0;
   mockState.failuresRemaining = 0;
+  mockState.confirmationPolls = 0;
+  mockState.sentRawTxCount = 0;
+  mockState.txError = null;
   vi.resetModules();
 });
 
@@ -71,5 +95,88 @@ describe("createCachedConnection — retry on 429", () => {
     expect(stats).toHaveProperty("misses");
     expect(stats).toHaveProperty("usingFallback");
     expect(stats.usingFallback).toBe(false);
+  }, 10000);
+
+  it("polls signature status instead of relying on websocket confirmation", async () => {
+    const { createCachedConnection } = await import("../../utils/rpc-cache.js");
+    const conn = createCachedConnection("http://127.0.0.1:1234", "confirmed");
+
+    const result = await conn.confirmTransaction(
+      {
+        signature: "test-signature",
+        blockhash: "11111111111111111111111111111111",
+        lastValidBlockHeight: 200,
+      },
+      "confirmed",
+    );
+
+    expect(result.value[0].confirmationStatus).toBe("confirmed");
+    expect(mockState.confirmationPolls).toBe(3);
+  }, 10000);
+});
+
+describe("sendAndConfirmPolling", () => {
+  function makeLegacyTx() {
+    // Minimal object that mimics a legacy Transaction
+    return {
+      instructions: [],
+      recentBlockhash: null,
+      lastValidBlockHeight: null,
+      feePayer: null,
+      sign: vi.fn(),
+      serialize: vi.fn(() => Buffer.from("fake-tx")),
+    };
+  }
+
+  it("sends via sendRawTransaction and polls — never uses signatureSubscribe", async () => {
+    const { createCachedConnection, sendAndConfirmPolling } =
+      await import("../../utils/rpc-cache.js");
+    const conn = createCachedConnection("http://127.0.0.1:1234", "confirmed");
+    const tx = makeLegacyTx();
+    const wallet = { publicKey: "wallet-pubkey" };
+
+    const sig = await sendAndConfirmPolling(conn, tx, [wallet]);
+
+    expect(sig).toBe("mock-signature-abc123");
+    expect(mockState.sentRawTxCount).toBe(1);
+    expect(mockState.confirmationPolls).toBe(3); // polls until confirmed
+    expect(tx.sign).toHaveBeenCalledWith(wallet);
+  }, 10000);
+
+  it("returns the transaction signature on success", async () => {
+    const { createCachedConnection, sendAndConfirmPolling } =
+      await import("../../utils/rpc-cache.js");
+    const conn = createCachedConnection("http://127.0.0.1:1234", "confirmed");
+    const tx = makeLegacyTx();
+
+    const sig = await sendAndConfirmPolling(conn, tx, [{ publicKey: "pk" }]);
+
+    expect(typeof sig).toBe("string");
+    expect(sig.length).toBeGreaterThan(0);
+  }, 10000);
+
+  it("throws when the transaction lands on-chain with an error", async () => {
+    mockState.txError = { InstructionError: [0, "InvalidAccountData"] };
+    const { createCachedConnection, sendAndConfirmPolling } =
+      await import("../../utils/rpc-cache.js");
+    const conn = createCachedConnection("http://127.0.0.1:1234", "confirmed");
+    const tx = makeLegacyTx();
+
+    await expect(sendAndConfirmPolling(conn, tx, [{ publicKey: "pk" }])).rejects.toThrow(/failed/i);
+    // tx was sent — it landed, just with an error
+    expect(mockState.sentRawTxCount).toBe(1);
+  }, 10000);
+
+  it("sets recentBlockhash and feePayer on the transaction before signing", async () => {
+    const { createCachedConnection, sendAndConfirmPolling } =
+      await import("../../utils/rpc-cache.js");
+    const conn = createCachedConnection("http://127.0.0.1:1234", "confirmed");
+    const tx = makeLegacyTx();
+    const wallet = { publicKey: "my-wallet" };
+
+    await sendAndConfirmPolling(conn, tx, [wallet]);
+
+    expect(tx.recentBlockhash).toBe("11111111111111111111111111111111");
+    expect(tx.feePayer).toBe("my-wallet");
   }, 10000);
 });
