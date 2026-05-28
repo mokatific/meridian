@@ -665,6 +665,10 @@ export async function notifyDeploy({
     ? `Mode: DRY RUN — no real transaction sent\n`
     : `Position: <code>${position?.slice(0, 8)}...</code>\nTx: <code>${tx?.slice(0, 16)}...</code>`;
   const narrativeStr = narrative ? `\n\n📖 Narrative\n${normalizeText(narrative)}` : "";
+  // Gas cost estimate for live reference
+  const gasEstimate = dryRun
+    ? `\n⛽ Est. gas (live): ~0.0005 SOL (~$${(0.0005 * 80).toFixed(3)})\n`
+    : "";
   await sendHTML(
     `${icon} <b>${label}</b> ${pair}\n` +
       `Amount: ${amountSol} SOL\n` +
@@ -672,6 +676,7 @@ export async function notifyDeploy({
       coverageStr +
       poolStr +
       posStr +
+      gasEstimate +
       narrativeStr,
   );
 }
@@ -685,6 +690,7 @@ export async function notifyClose({
   minutesHeld,
   priceChangePct,
   dryRun,
+  amountSol,
 }) {
   if (hasActiveLiveMessage()) return;
   const sign = pnlUsd >= 0 ? "+" : "";
@@ -697,12 +703,28 @@ export async function notifyClose({
       : "";
   const icon = dryRun ? "🧪" : "🔒";
   const label = dryRun ? "Closed (DRY RUN)" : "Closed";
+
+  // Gas cost + real net PnL for dry-run (so you know what live would look like)
+  let gasLine = "";
+  let netLine = "";
+  if (dryRun) {
+    const gasDeploy = 0.0005 * 80; // ~$0.04
+    const gasClose = 0.0002 * 80; // ~$0.016
+    const totalGas = gasDeploy + gasClose;
+    const netPnl = (pnlUsd ?? 0) - totalGas;
+    const netSign = netPnl >= 0 ? "+" : "";
+    gasLine = `⛽ Est. gas (live): ~$${totalGas.toFixed(3)} (deploy+close)\n`;
+    netLine = `📊 Net after gas: ${netSign}$${netPnl.toFixed(3)}\n`;
+  }
+
   await sendHTML(
     `${icon} <b>${label}</b> ${pair}\n` +
       `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)\n` +
       feesLine +
       holdLine +
       priceChangeLine +
+      gasLine +
+      netLine +
       reasonLine,
   );
 }
