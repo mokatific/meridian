@@ -20,11 +20,8 @@ import { fileURLToPath } from "url";
 import { log } from "./logger.js";
 import { logPositionClose, initLogger } from "./position-logger.js";
 import { config } from "./config.js";
-import { recordPerformance } from "./lessons.js";
 import { addToBlacklist } from "./token-blacklist.js";
 import { blockDev } from "./dev-blocklist.js";
-import { addPoolNote } from "./pool-memory.js";
-import { appendDecision } from "./decision-log.js";
 import { Connection, PublicKey } from "@solana/web3.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -470,45 +467,12 @@ async function _closeVirtualPosition(pos, evaluation) {
   );
 
   // ── Smart wallet feedback loop ─────────────────────────────────
-  const swAddresses = pos.signal_snapshot?.smart_wallet_addresses || [];
-  if (swAddresses.length) {
-    try {
-      const { feedbackToWallets } = await import("./wallet-evolution.js");
-      feedbackToWallets(swAddresses, {
-        pnl_pct: evaluation.pnl_pct,
-        close_reason: evaluation.reason,
-        pool_name: pos.pool_name,
-      });
-    } catch (e) {
-      log("simulator_warn", `Wallet feedback error: ${e.message}`);
-    }
-  }
+  // Skipped in dry-run — virtual PnL is simulated and would corrupt live wallet scores.
 
   // ── Feed into full learning pipeline ──────────────────────────
-  await recordPerformance({
-    position: pos.position,
-    pool: pos.pool,
-    pool_name: pos.pool_name,
-    base_mint: pos.base_mint,
-    strategy: pos.strategy,
-    bin_range: pos.bin_range,
-    bin_step: pos.bin_step,
-    volatility: pos.volatility,
-    fee_tvl_ratio: pos.fee_tvl_ratio,
-    organic_score: pos.organic_score,
-    amount_sol: pos.amount_sol,
-    fees_earned_usd: evaluation.fees_usd,
-    fees_earned_sol: evaluation.fees_usd / (await _getSolPrice()),
-    final_value_usd: (pos.initial_value_usd ?? 0) + evaluation.pnl_usd,
-    initial_value_usd: pos.initial_value_usd ?? 0,
-    minutes_in_range: evaluation.in_range
-      ? evaluation.minutes_held
-      : Math.floor(evaluation.minutes_held * 0.4),
-    minutes_held: evaluation.minutes_held,
-    close_reason: evaluation.reason,
-    deployed_at: pos.deployed_at,
-    virtual: true,
-  });
+  // Skipped in dry-run — virtual closes must not pollute lessons.json,
+  // pool-memory.json, signal-weights.json, or threshold evolution used by live trading.
+  // History is kept in virtual-positions.json only.
 
   // ── Auto-blacklist on suspected rug (fast stop loss) ──────────
   const isLikelyRug =
@@ -547,26 +511,10 @@ async function _closeVirtualPosition(pos, evaluation) {
   }
 
   // ── Pool note ──────────────────────────────────────────────────
-  if (pos.pool) {
-    const noteText = `[DRY RUN] ${evaluation.reason} | PnL: ${evaluation.pnl_pct}% | held: ${evaluation.minutes_held}m`;
-    try {
-      addPoolNote({ pool_address: pos.pool, note: noteText });
-    } catch {
-      /* non-critical */
-    }
-  }
+  // Skipped — pool-memory.json is shared with live trading.
 
   // ── Decision log ───────────────────────────────────────────────
-  appendDecision({
-    type: "close",
-    actor: "SIMULATOR",
-    summary: `Virtual close: ${pos.pool_name}`,
-    reason: evaluation.reason,
-    pool: pos.pool,
-    pool_name: pos.pool_name,
-    pnl_pct: evaluation.pnl_pct,
-    virtual: true,
-  });
+  // Skipped — decision-log.json is shared with live trading.
 
   // ── Config optimizer (every 5 virtual closes) ─────────────────
   const freshLog = loadVirtualLog();
