@@ -2777,19 +2777,12 @@ function fmtPct(value) {
 
 function getLoneCandidateSkipReason({ pool, sw, n, ti } = {}) {
   if (!pool) return "missing candidate data";
-  const smartWalletCount = Math.max(
-    sw?.in_pool?.length ?? 0,
-    Number(pool.gmgn_smart_wallets ?? 0) || 0,
-  );
+  const smartWalletCount = Math.max(sw?.in_pool?.length ?? 0, pool.smart_money_buy ? 1 : 0);
   const tokenInfo = ti || {};
   const hasNarrative = !!n?.narrative;
-  const globalFeesSol = Number(tokenInfo.global_fees_sol ?? pool.gmgn_total_fee_sol);
-  const top10Pct = Number(
-    tokenInfo.audit?.top_holders_pct ??
-      pool.gmgn_token_info_top10_pct ??
-      pool.gmgn_top10_holder_pct,
-  );
-  const botPct = Number(tokenInfo.audit?.bot_holders_pct ?? pool.gmgn_bot_degen_pct);
+  const globalFeesSol = Number(tokenInfo.global_fees_sol ?? pool.total_fee_sol);
+  const top10Pct = Number(tokenInfo.audit?.top_holders_pct ?? pool.top10_pct);
+  const botPct = Number(tokenInfo.audit?.bot_holders_pct ?? pool.bot_holders_pct);
   if (pool.is_wash) return "wash trading was flagged";
   if (pool.is_rugpull && smartWalletCount === 0)
     return "rugpull risk was flagged and no smart wallets offset it";

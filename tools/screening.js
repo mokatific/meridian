@@ -765,6 +765,8 @@ export async function getTopCandidates({ limit = 10 } = {}) {
         eligible[i].dev_sold_all = adv.dev_sold_all;
         eligible[i].dex_boost = adv.dex_boost;
         eligible[i].dex_screener_paid = adv.dex_screener_paid;
+        eligible[i].top10_pct = adv.top10_pct;
+        eligible[i].total_fee_sol = adv.total_fee_sol;
         if (adv.creator && !eligible[i].dev) eligible[i].dev = adv.creator;
       }
       if (risk) {
@@ -926,6 +928,7 @@ function condensePool(p) {
   return {
     pool: p.pool_address,
     name: p.name,
+    base_mint: p.token_x?.address || null,
     base: {
       symbol: p.token_x?.symbol,
       mint: p.token_x?.address,

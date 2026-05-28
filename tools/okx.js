@@ -115,7 +115,6 @@ async function fetchServerOkxEnrichment(tokenAddress, chainIndex = CHAIN_SOLANA)
 }
 
 async function getServerOkxEnrichmentOrNull(tokenAddress, chainIndex = CHAIN_SOLANA) {
-  if (hasAuth()) return null;
   try {
     return await fetchServerOkxEnrichment(tokenAddress, chainIndex);
   } catch {
