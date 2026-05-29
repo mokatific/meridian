@@ -431,6 +431,7 @@ export async function agentLoop(
   const NO_RETRY_TOOLS = new Set(["deploy_position"]);
   const firedOnce = new Set();
   const firstAttemptReason = new Map();
+  const firstAttemptSuccess = new Map();
   const mustUseRealTool = shouldRequireRealToolUse(goal, agentType, interactive);
   let sawToolCall = false;
   let noToolRetryCount = 0;
@@ -473,6 +474,7 @@ export async function agentLoop(
             tools: getToolsForRole(agentType, goal),
             temperature: config.llm.temperature,
             max_tokens: maxOutputTokens ?? config.llm.maxTokens,
+            stream: false,
           };
           if (!omitToolChoice) params.tool_choice = toolChoice;
           response = await usedClient.chat.completions.create(params);
@@ -786,10 +788,18 @@ export async function agentLoop(
           if (ONCE_PER_SESSION.has(functionName) && firedOnce.has(functionName)) {
             log("agent", `Blocked duplicate ${functionName} call — already executed this session`);
             const priorReason = firstAttemptReason.get(functionName);
-            const reasonSuffix = priorReason ? ` Original failure reason: ${priorReason}.` : "";
-            const guardReason =
-              `${functionName} already attempted this session — do not retry. ` +
-              `If it failed, report the error and stop.${reasonSuffix}`;
+            const priorSuccess = firstAttemptSuccess.get(functionName);
+            let guardReason;
+            if (priorSuccess) {
+              guardReason =
+                `${functionName} already succeeded this session — do not call again. ` +
+                `Report the successful result and give your final answer now.`;
+            } else {
+              const reasonSuffix = priorReason ? ` Original failure reason: ${priorReason}.` : "";
+              guardReason =
+                `${functionName} already attempted this session — do not retry. ` +
+                `Report the error and give your final answer now.${reasonSuffix}`;
+            }
             await onToolFinish?.({
               name: functionName,
               args: functionArgs,
@@ -823,6 +833,10 @@ export async function agentLoop(
           if (ONCE_PER_SESSION.has(functionName) && !firstAttemptReason.has(functionName)) {
             const attemptReason = result?.error || result?.reason;
             if (attemptReason) firstAttemptReason.set(functionName, attemptReason);
+            firstAttemptSuccess.set(
+              functionName,
+              result?.success === true || result?.dry_run === true,
+            );
           }
 
           // Lock deploy_position after first attempt regardless of outcome — retrying is never right
