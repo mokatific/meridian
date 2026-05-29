@@ -227,11 +227,12 @@ function evaluatePreset(side, preset, payload) {
       // Exit: supertrend flips bearish.
       return side === "entry"
         ? {
-            confirmed: isBullish && rsi != null && rsi < 60, // block only when clearly overbought
-            reason:
-              rsi != null && rsi >= 60
+            confirmed: isBullish && rsi != null && rsi < 60,
+            reason: !isBullish
+              ? `BLOCKED: Supertrend bearish (${summary.supertrendDirection}), RSI ${rsi?.toFixed(1)}`
+              : rsi != null && rsi >= 60
                 ? `BLOCKED: RSI ${rsi?.toFixed(1)} overbought — wait for cooldown`
-                : `Supertrend bullish, RSI ${rsi?.toFixed(1)} — not chasing top`,
+                : `Supertrend bullish, RSI ${rsi?.toFixed(1)} — confirmed`,
             signal: summary,
           }
         : {
