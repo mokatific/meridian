@@ -20,7 +20,15 @@ function sleep(ms) {
 }
 
 function isRetryableStatus(status) {
-  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+  // status 0 = AbortError (timeout) — always retryable
+  return (
+    status === 0 ||
+    status === 408 ||
+    status === 409 ||
+    status === 425 ||
+    status === 429 ||
+    status >= 500
+  );
 }
 
 function retryDelayMs(error, attempt) {

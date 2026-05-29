@@ -53,9 +53,10 @@ positions.command("status", async (ctx) => {
     const screening = config.screening?.enabled ? "active" : "paused";
     const mode = config.management?.solMode ? "SOL mode" : "USD mode";
     const lines = [
-      `🧙 *Bot Status*`,
+      `🧙 Bot Status`,
+      ``,
       `${dryRun} | ${mode}`,
-      `Screening: ${screening}`,
+      `🔍 Screening: ${screening}`,
       ``,
       `💰 ${sol} SOL (~$${usd})`,
       `📊 ${posCount} positions | Value: ${cur}${totalVal} | PnL: ${pnlStr}`,

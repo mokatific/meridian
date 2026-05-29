@@ -41,6 +41,7 @@ async function registerCommands() {
       { command: "hive", description: "HiveMind sync status" },
       { command: "pause", description: "Stop cron cycles" },
       { command: "resume", description: "Start cron cycles" },
+      { command: "stop", description: "Graceful shutdown" },
       { command: "help", description: "Show all commands" },
     ]);
     log("telegram", "Commands registered via setMyCommands");

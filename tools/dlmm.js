@@ -101,8 +101,35 @@ function getWallet() {
   return _wallet;
 }
 
+// Circuit breaker: after 3 consecutive relay failures, skip the relay for 10 minutes.
+const _relay = { failures: 0, openUntil: 0 };
+const RELAY_FAILURE_THRESHOLD = 3;
+const RELAY_COOLDOWN_MS = 10 * 60 * 1000;
+
 function shouldUseLpAgentRelay() {
-  return !!config.api.lpAgentRelayEnabled;
+  if (!config.api.lpAgentRelayEnabled) return false;
+  if (_relay.openUntil > Date.now()) return false;
+  if (_relay.openUntil > 0) {
+    _relay.failures = 0;
+    _relay.openUntil = 0;
+  }
+  return true;
+}
+
+function _relaySuccess() {
+  _relay.failures = 0;
+  _relay.openUntil = 0;
+}
+
+function _relayFailure() {
+  _relay.failures += 1;
+  if (_relay.failures >= RELAY_FAILURE_THRESHOLD) {
+    _relay.openUntil = Date.now() + RELAY_COOLDOWN_MS;
+    log(
+      "positions_warn",
+      `Relay circuit breaker open — skipping relay for 10 min after ${_relay.failures} consecutive failures`,
+    );
+  }
 }
 
 function shouldUseLpAgentRelayForDeploy() {
@@ -1401,9 +1428,11 @@ export async function getMyPositions({
             walletAddress,
             agentId: getAgentIdForRequests(),
           });
+          _relaySuccess();
           relayLpAgentByPosition = result.byPosition || {};
           relayRequestId = result.requestId || result.request_id || null;
         } catch (error) {
+          _relayFailure();
           log(
             "positions_warn",
             `Agent Meridian raw relay failed; falling back to direct LPAgent fetch: ${error.message}`,

@@ -3297,6 +3297,7 @@ if (isMain && isTTY) {
       cronStarted = v;
     },
     timers,
+    shutdown,
   });
   bindAgentFallback({
     agentLoop,
@@ -3567,6 +3568,7 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
       cronStarted = v;
     },
     timers,
+    shutdown,
   });
   bindAgentFallback({
     agentLoop,

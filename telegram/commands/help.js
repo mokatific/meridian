@@ -2,37 +2,43 @@ import { Composer } from "grammy";
 
 const help = new Composer();
 
-const HELP_TEXT = `🎛 Meridian Bot Commands
+const HELP_TEXT = `🎛 Meridian Commands
 
-/menu — Inline command menu
-/positions — List open positions
-/close <idx> — Close position by index
-/closeall — Close all positions
-/pool <addr> — Pool detail
-/set <key> <val> — Quick config set
+📊 Positions
+/status — Bot overview: mode, wallet, PnL
+/wallet — Wallet balance + virtual wallet (dry run)
+/positions — List all open positions
+/pool <n> — Detailed view of one position by index
+/close <n> — Close one position by index
+/closeall — Close all open positions
+/set <n> <note> — Attach a note or instruction to a position
 
-/screen — Refresh candidate list
-/candidates — Show last candidates
-/deploy <idx> — Deploy to candidate
+🔍 Screening
+/screen — Run deterministic candidate screen now
+/candidates — Show last cached candidate list
+/deploy <n> — Deploy into a cached candidate by index
 
-/config — Show runtime config
-/settings — Settings menu (inline)
+⚙️ Config
+/config — Show current runtime config snapshot
+/settings — Inline settings menu (buttons)
+/setcfg <key> <value> — Update a config key and persist
 
-/briefing — Morning briefing
-/analysis — Deep analysis
-/sim — Dry run stats
+📈 Reporting
+/briefing — Daily performance briefing
+/analysis — Causal analysis: why positions win or lose
+/sim — Virtual trading summary (dry run stats)
 
-/health — Check all external services
-/wallet — Wallet balance
-/status — Bot status overview
-
+🧠 Smart Wallets & HiveMind
+/smart_wallets — List tracked KOL / smart wallets
 /hive — HiveMind sync status
-/hive pull — Manual HiveMind pull
+/hive pull — Trigger a manual HiveMind pull now
 
-/pause — Stop cron cycles
-/resume — Resume cron cycles
+🔧 System
+/health — Check all external service connectivity
+/pause — Stop autonomous cron cycles
+/resume — Resume autonomous cron cycles
 /stop — Graceful shutdown
-
+/menu — Inline button menu
 /help — This message`;
 
 help.command("help", (ctx) => ctx.reply(HELP_TEXT));

@@ -9,6 +9,7 @@ let _startCronJobs = null;
 let _getCronStarted = null;
 let _setCronStarted = null;
 let _timers = null;
+let _shutdown = null;
 
 export function bindCronControls({
   stopCronJobs,
@@ -16,12 +17,14 @@ export function bindCronControls({
   getCronStarted,
   setCronStarted,
   timers,
+  shutdown,
 }) {
   _stopCronJobs = stopCronJobs;
   _startCronJobs = startCronJobs;
   _getCronStarted = getCronStarted;
   _setCronStarted = setCronStarted;
   _timers = timers;
+  _shutdown = shutdown;
 }
 
 // /pause
@@ -31,6 +34,16 @@ control.command("pause", async (ctx) => {
   await ctx.reply(
     "⏸ Paused autonomous cycles. Telegram control still works. Use /resume to start again.",
   );
+});
+
+// /stop
+control.command("stop", async (ctx) => {
+  await ctx.reply("⏹ Shutting down Meridian...");
+  if (_shutdown) {
+    _shutdown("telegram /stop");
+  } else {
+    process.exit(0);
+  }
 });
 
 // /resume
