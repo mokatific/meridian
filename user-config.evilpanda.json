@@ -114,21 +114,22 @@
   "agentId": "<REDACTED>",
   "publicApiKey": "",
   "agentMeridianApiUrl": "https://api.agentmeridian.xyz/api",
-  "lpAgentRelayEnabled": false,
+  "lpAgentRelayEnabled": true,
   "hiveMindUrl": "https://api.agentmeridian.xyz",
   "hiveMindApiKey": "",
   "hiveMindPullMode": "auto",
 
   "_title11": "Chart Indicators",
+  "_note11": "Enabled with momentum_dip preset — looks for RSI pullback to 35-50 range while supertrend still bullish. Safer than supertrend_break alone (which can trigger at ATH). For new Solana pairs with limited history, requireAllIntervals=false so one interval confirming is enough. Uses 5m for entry timing. Falls back gracefully if indicator API is down.",
   "chartIndicators": {
-    "enabled": false,
-    "entryPreset": "supertrend_break",
+    "enabled": true,
+    "entryPreset": "momentum_dip",
     "exitPreset": "supertrend_break",
     "rsiLength": 2,
     "intervals": ["5_MINUTE"],
     "candles": 298,
-    "rsiOversold": 30,
-    "rsiOverbought": 80,
+    "rsiOversold": 35,
+    "rsiOverbought": 75,
     "requireAllIntervals": false
   },
 
