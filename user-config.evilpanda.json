@@ -86,6 +86,9 @@
   "managementIntervalMin": 10,
   "screeningIntervalMin": 45,
   "healthCheckIntervalMin": 60,
+  "discoverTwitterWallets": true,
+  "twitterKolHandles": ["EvilPanda", "arip13741167", "4thinfected"],
+  "twitterWalletCron": "0 */6 * * *",
 
   "_title7": "LLM",
   "temperature": 0.2,

@@ -31,9 +31,7 @@ skipped-tracker.js    Missed-opportunity tracker (skipped-pools.json)
 position-logger.js    Append-only audit trail (position-journal.db, SQLite)
 logger.js             Daily-rotating log files + action audit trail
 cli.js                CLI surface — each tool exposed as a subcommand with JSON output
-twitter-wallet.js     Twitter/X KOL tweet scraper for wallet discovery
-wallet-maintenance-cron.sh  Hermes cron: Twitter KOL discovery + wallet pruning
-twitter-wallet-cron.sh      Hermes cron: Twitter KOL discovery only
+twitter-wallet.js     Twitter/X KOL tweet scraper for wallet discovery (used by native cron when discoverTwitterWallets=true)
 
 tools/
   definitions.js      Tool schemas in OpenAI format (what LLM sees)
@@ -186,11 +184,14 @@ A redacted template lives in `user-config.example.json` — copy it to `user-con
 
 ### Scheduling (cron intervals, minutes)
 
-| Key                    | Default | Description                                                 |
-| ---------------------- | ------- | ----------------------------------------------------------- |
-| managementIntervalMin  | `10`    | MANAGER cycle: list positions, decide claim / close / hold. |
-| screeningIntervalMin   | `30`    | SCREENER cycle: pull candidates, decide whether to deploy.  |
-| healthCheckIntervalMin | `60`    | Hourly health-check chat (set to `120` etc. to slow down).  |
+| Key                    | Default              | Description                                                                                                                                                                                                                                              |
+| ---------------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| managementIntervalMin  | `10`                 | MANAGER cycle: list positions, decide claim / close / hold.                                                                                                                                                                                              |
+| screeningIntervalMin   | `30`                 | SCREENER cycle: pull candidates, decide whether to deploy.                                                                                                                                                                                               |
+| healthCheckIntervalMin | `60`                 | Hourly health-check chat (set to `120` etc. to slow down).                                                                                                                                                                                               |
+| discoverTwitterWallets | `false`              | Enable native Twitter KOL wallet discovery cron. Requires twitter-cli ([github.com/public-clis/twitter-cli](https://github.com/public-clis/twitter-cli)) to be installed. Checked once at startup; cron skipped with a log warning if binary is missing. |
+| twitterKolHandles      | `["EvilPanda", ...]` | KOL handles to scan. Defaults to `["EvilPanda", "arip13741167", "4thinfected"]`.                                                                                                                                                                         |
+| twitterWalletCron      | `"0 */6 * * *"`      | Cron expression for Twitter discovery (default: every 6 hours).                                                                                                                                                                                          |
 
 ### LLM
 
@@ -324,18 +325,19 @@ Progress bar format: `[████████░░░░░░░░░░░
 
 ## Cron Jobs (index.js → startCronJobs)
 
-| Cron pattern       | Task               | Purpose                                                                                            |
-| ------------------ | ------------------ | -------------------------------------------------------------------------------------------------- |
-| `*/managementInt`  | `mgmtTask`         | Run a MANAGER cycle: list positions, claim/close/hold decisions                                    |
-| `*/screeningInt`   | `screenTask`       | Run a SCREENER cycle: pull candidates, decide whether to deploy                                    |
-| `0 * * * *`        | `healthTask`       | Hourly health-check chat                                                                           |
-| `0 1 * * *` (UTC)  | `briefingTask`     | Morning briefing (08:00 UTC+7 = 01:00 UTC)                                                         |
-| `0 */6 * * *`      | `briefingWatchdog` | Catch up a missed briefing (process restart, crash)                                                |
-| `0 */2 * * *`      | `walletEvoTask`    | Auto-discover and prune smart wallets from top trending pools                                      |
-| `*/5 * * * *`      | `paperTickTask`    | Tick every open paper position: fetch new candles, accrue fees, recompute IL (no LLM, no on-chain) |
-| `setInterval(30s)` | `pnlPollInterval`  | Lightweight PnL poll for trailing-TP / deterministic close triggers between management cycles      |
+| Cron pattern                 | Task                | Purpose                                                                                                                                                         |
+| ---------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `*/managementInt`            | `mgmtTask`          | Run a MANAGER cycle: list positions, claim/close/hold decisions                                                                                                 |
+| `*/screeningInt`             | `screenTask`        | Run a SCREENER cycle: pull candidates, decide whether to deploy                                                                                                 |
+| `0 * * * *`                  | `healthTask`        | Hourly health-check chat                                                                                                                                        |
+| `0 1 * * *` (UTC)            | `briefingTask`      | Morning briefing (08:00 UTC+7 = 01:00 UTC)                                                                                                                      |
+| `0 */6 * * *`                | `briefingWatchdog`  | Catch up a missed briefing (process restart, crash)                                                                                                             |
+| `0 */2 * * *`                | `walletEvoTask`     | Auto-discover and prune smart wallets from top trending pools                                                                                                   |
+| `twitterWalletCron` (opt-in) | `twitterWalletTask` | Twitter KOL wallet discovery — only armed when `discoverTwitterWallets=true` AND twitter-cli is found on PATH. Skipped with a log warning if binary is missing. |
+| `*/5 * * * *`                | `paperTickTask`     | Tick every open paper position: fetch new candles, accrue fees, recompute IL (no LLM, no on-chain)                                                              |
+| `setInterval(30s)`           | `pnlPollInterval`   | Lightweight PnL poll for trailing-TP / deterministic close triggers between management cycles                                                                   |
 
-All cron tasks are pushed into the module-level `_cronTasks` array and torn down by `stopCronJobs()`. `_managementBusy` / `_screeningBusy` / `_paperTickBusy` flags guard against overlapping runs. Interval crons (`managementIntervalMin`, `screeningIntervalMin`) restart automatically when `update_config` changes their values — handled by `registerCronRestarter()` in executor.js.
+All cron tasks are pushed into the module-level `_cronTasks` array (filtered for null) and torn down by `stopCronJobs()`. `_managementBusy` / `_screeningBusy` / `_paperTickBusy` flags guard against overlapping runs. Interval crons (`managementIntervalMin`, `screeningIntervalMin`) restart automatically when `update_config` changes their values — handled by `registerCronRestarter()` in executor.js.
 
 ---
 
@@ -456,7 +458,7 @@ Agent Meridian HiveMind sync is handled by `hivemind.js`. It uses built-in Agent
 
 - `lessons.js evolveThresholds()` evolves `maxVolatility` + `minFeeActiveTvlRatio` (fixed from `minFeeTvlRatio`). Both keys now exist in config.js and are properly applied.
 - `get_wallet_positions` tool (dlmm.js) is in definitions.js but not in MANAGER_TOOLS or SCREENER_TOOLS — only available in GENERAL role.
-- `discover_wallets_from_twitter` is only in GENERAL intent tools, not in SCREENER_TOOLS — screener can't call it autonomously.
+- `discover_wallets_from_twitter` is only in GENERAL intent tools, not in SCREENER_TOOLS — screener can't call it autonomously. The native `twitterWalletTask` cron handles scheduled discovery independently.
 
 ---
 

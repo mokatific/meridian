@@ -163,6 +163,11 @@ export const config = {
     healthCheckIntervalMin: u.healthCheckIntervalMin ?? 60,
     screeningOffsetSec: u.screeningOffsetSec ?? 0,
     walletEvoCron: u.walletEvoCron ?? "0 */2 * * *",
+    discoverTwitterWallets: u.discoverTwitterWallets ?? false,
+    twitterKolHandles: Array.isArray(u.twitterKolHandles)
+      ? u.twitterKolHandles
+      : ["EvilPanda", "arip13741167", "4thinfected"],
+    twitterWalletCron: u.twitterWalletCron ?? "0 */6 * * *",
   },
 
   // ─── LLM Settings ──────────────────────

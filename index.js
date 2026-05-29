@@ -2,6 +2,7 @@ import "./envcrypt.js";
 import cron from "node-cron";
 import readline from "readline";
 import path from "path";
+import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
@@ -55,9 +56,11 @@ import {
 import {
   checkSmartWalletsOnPool,
   listSmartWallets,
+  addSmartWallet,
   initSmartWalletsFile,
   getWalletConfidence,
 } from "./smart-wallets.js";
+import { discoverWalletsFromKolTweets } from "./twitter-wallet.js";
 import { evolveSmartWallets } from "./wallet-evolution.js";
 import {
   registerVirtualPosition,
@@ -1690,6 +1693,61 @@ Summarize the current portfolio health, total fees earned, and performance of al
     }
   });
 
+  // Twitter KOL wallet discovery — only runs when discoverTwitterWallets is enabled
+  // and twitter-cli is available on the host. Checks once at startup; skips the
+  // cron entirely if the binary is missing so the agent never blocks on it.
+  let twitterWalletTask = null;
+  if (config.schedule.discoverTwitterWallets) {
+    const twitterAvailable = (() => {
+      try {
+        execSync("which twitter || test -f ~/.local/bin/twitter", {
+          stdio: "ignore",
+          timeout: 2000,
+          shell: "/bin/bash",
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+
+    if (!twitterAvailable) {
+      log(
+        "twitter_wallet",
+        "discoverTwitterWallets=true but twitter-cli not found — skipping Twitter discovery cron. Install from https://github.com/public-clis/twitter-cli",
+      );
+    } else {
+      let _twitterWalletBusy = false;
+      const twitterWalletCronExpr = config.schedule.twitterWalletCron ?? "0 */6 * * *";
+      twitterWalletTask = cron.schedule(twitterWalletCronExpr, async () => {
+        if (_twitterWalletBusy) return;
+        _twitterWalletBusy = true;
+        try {
+          const { wallets: existing } = listSmartWallets();
+          const result = await discoverWalletsFromKolTweets({
+            kolHandles: config.schedule.twitterKolHandles,
+            tweetsPerKol: 10,
+          });
+          let added = 0;
+          for (const c of result.candidates) {
+            if (existing.some((w) => w.address === c.address)) continue;
+            const res = addSmartWallet(c);
+            if (res.success) added++;
+          }
+          log(
+            "twitter_wallet",
+            `Discovery cycle: ${result.addressesFound} address(es) found, +${added} wallet(s) added`,
+          );
+        } catch (e) {
+          log("twitter_wallet", `Discovery error: ${e.message}`);
+        } finally {
+          _twitterWalletBusy = false;
+        }
+      });
+      log("twitter_wallet", `Twitter discovery cron armed: ${twitterWalletCronExpr}`);
+    }
+  }
+
   // Paper-position ticker — runs every 5m to accrue fees and recompute IL on
   // any open paper positions. Off by 30s to avoid colliding with management.
   let _paperTickBusy = false;
@@ -1715,14 +1773,18 @@ Summarize the current portfolio health, total fees earned, and performance of al
     briefingTask,
     briefingWatchdog,
     walletEvoTask,
+    twitterWalletTask,
     paperTickTask,
-  ];
+  ].filter(Boolean);
   // Store interval refs so stopCronJobs can clear them
   _cronTasks._pnlPollInterval = pnlPollInterval;
   if (virtualPollInterval) _cronTasks._virtualPollInterval = virtualPollInterval;
+  const twitterCronNote = twitterWalletTask
+    ? `, twitter discovery: ${config.schedule.twitterWalletCron ?? "0 */6 * * *"}`
+    : "";
   log(
     "cron",
-    `Cycles started — management every ${config.schedule.managementIntervalMin}m, screening every ${config.schedule.screeningIntervalMin}m${offsetMin > 0 ? ` (offset +${offsetMin}m)` : ""}, wallet evo: ${walletEvoCronExpr}`,
+    `Cycles started — management every ${config.schedule.managementIntervalMin}m, screening every ${config.schedule.screeningIntervalMin}m${offsetMin > 0 ? ` (offset +${offsetMin}m)` : ""}, wallet evo: ${walletEvoCronExpr}${twitterCronNote}`,
   );
 }
 

@@ -620,34 +620,33 @@ All four are available to both MANAGER and SCREENER roles, and via the GENERAL c
 
 ---
 
-## Hermes Cron Jobs
+## Twitter KOL Wallet Discovery
 
-Two shell scripts handle smart wallet maintenance outside the main agent process. These are designed to run as Hermes cron jobs so results are delivered via Telegram.
+Meridian runs Twitter KOL wallet discovery as a **native cron** inside the main process — no external shell scripts or Hermes required.
 
-| Script                       | Purpose                                                                                                        |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `wallet-maintenance-cron.sh` | Twitter KOL discovery + wallet evolution (prune stale wallets). Superset of the twitter script — run this one. |
-| `twitter-wallet-cron.sh`     | Twitter KOL discovery only (no pruning). Redundant if you run the maintenance script.                          |
+### Enable
 
-### Setup
+Set in `user-config.json`:
 
-```yaml
-# ~/.hermes/skills/wallet_maintenance/skill.yaml
-name: wallet_maintenance
-description: Smart wallet discovery and pruning
-actions:
-  - run:
-      command: /home/ubuntu/meridian/wallet-maintenance-cron.sh
+```json
+"discoverTwitterWallets": true,
+"twitterKolHandles": ["EvilPanda", "arip13741167", "4thinfected"],
+"twitterWalletCron": "0 */6 * * *"
 ```
 
-```bash
-hermes cron create "every 6h" \
-  --skill wallet_maintenance \
-  --deliver telegram \
-  --name "Smart wallet maintenance"
-```
+### Prerequisites
 
-The script sources `~/.twitter-env` for Twitter API credentials. Make sure that file exists on the host before scheduling.
+Install [twitter-cli](https://github.com/public-clis/twitter-cli) and make it available on PATH (typically `~/.local/bin/twitter`). Meridian checks for the binary once at startup — if it is not found, the cron is skipped and a warning is logged. No crash, no blocking.
+
+The `discoverTwitterWallets` flag defaults to `false` so existing setups are unaffected.
+
+### What it does
+
+Each cycle (default every 6 hours):
+
+1. Scans KOL tweets for `solana:ADDRESS` mentions via `twitter-cli`
+2. For each new address, queries OKX cluster data to find associated holder wallets
+3. Adds new candidates to `smart-wallets.json` (duplicates skipped)
 
 ---
 
