@@ -1,6 +1,7 @@
 import { rateLimitedDataPiFetch } from "../utils/datapi-limiter.js";
 import { searchTokenOfficial, mapOfficialToScreening } from "./jupiter-official.js";
 import { log } from "../logger.js";
+import { fetchGmgnTokenInfo } from "./gmgn.js";
 
 const DATAPI_BASE = "https://datapi.jup.ag/v1";
 
@@ -34,7 +35,7 @@ export async function getTokenInfo({ query }) {
       // Enrich first result with OKX smart money + risk data
       if (results[0]?.mint) {
         const { getAdvancedInfo, getClusterList } = await import("./okx.js");
-        const [adv, clusters, feesData] = await Promise.all([
+        const [adv, clusters, feesData, gmgnInfo] = await Promise.all([
           getAdvancedInfo(results[0].mint).catch(() => null),
           getClusterList(results[0].mint).catch(() => []),
           // global_fees_sol not available in official API — fetch from datapi
@@ -47,6 +48,7 @@ export async function getTokenInfo({ query }) {
               return t?.fees != null ? parseFloat(t.fees.toFixed(2)) : null;
             })
             .catch(() => null),
+          fetchGmgnTokenInfo(results[0].mint).catch(() => null),
         ]);
         if (adv) {
           results[0].risk_level = adv.risk_level;
@@ -68,6 +70,10 @@ export async function getTokenInfo({ query }) {
         }
         if (feesData != null) {
           results[0].global_fees_sol = feesData;
+        }
+        // GMGN total_fee is the most direct source — override datapi/OKX if available
+        if (gmgnInfo?.total_fee != null) {
+          results[0].global_fees_sol = parseFloat(parseFloat(gmgnInfo.total_fee).toFixed(2));
         }
       }
       return { found: true, query, results };
@@ -122,12 +128,13 @@ export async function getTokenInfo({ query }) {
     stats_24h_net_buyers: t.stats24h ? t.stats24h.numNetBuyers : null,
   }));
 
-  // Enrich first result with OKX smart money + risk data
+  // Enrich first result with OKX smart money + risk data and GMGN token info
   if (results[0]?.mint) {
     const { getAdvancedInfo, getClusterList } = await import("./okx.js");
-    const [adv, clusters] = await Promise.all([
+    const [adv, clusters, gmgnInfo] = await Promise.all([
       getAdvancedInfo(results[0].mint).catch(() => null),
       getClusterList(results[0].mint).catch(() => []),
+      fetchGmgnTokenInfo(results[0].mint).catch(() => null),
     ]);
     if (adv) {
       results[0].risk_level = adv.risk_level;
@@ -146,6 +153,10 @@ export async function getTokenInfo({ query }) {
       results[0].kol_in_clusters = clusters.some((c) => c.has_kol);
       results[0].top_cluster_trend = clusters[0]?.trend ?? null;
       results[0].clusters = clusters;
+    }
+    // GMGN total_fee is the most direct source — override datapi/OKX if available
+    if (gmgnInfo?.total_fee != null) {
+      results[0].global_fees_sol = parseFloat(parseFloat(gmgnInfo.total_fee).toFixed(2));
     }
   }
 

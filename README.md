@@ -57,6 +57,7 @@ The agent is powered via **OpenRouter** (or any compatible provider) and models 
 - Solana wallet (private key in base58 or JSON)
 - Solana RPC endpoint (Helius recommended)
 - Telegram bot token (optional)
+- [gmgn-cli](https://github.com/GMGNAI/gmgn-skills) + GMGN API key (required for smart money signals and token fee data)
 
 ---
 
@@ -99,6 +100,7 @@ OPENROUTER_API_KEY=sk-or-...
 HELIUS_API_KEY=your_helius_key   # for wallet balance lookup
 TELEGRAM_BOT_TOKEN=123456:ABC... # optional — for notifications + chat
 TELEGRAM_CHAT_ID=                # auto-filled after first message
+GMGN_API_KEY=gmgn_...            # required for smart money signals and token fee data
 DRY_RUN=true                     # set to false for live trading
 ```
 
@@ -109,6 +111,32 @@ Copy the example config and edit as needed:
 ```bash
 cp user-config.example.json user-config.json
 ```
+
+### 2b. Install gmgn-cli and get API key
+
+Meridian uses [gmgn-cli](https://github.com/GMGNAI/gmgn-skills) for smart money signals, KOL trade tracking, and token fee data. Without it, all GMGN-based screening signals are silently skipped.
+
+**Install:**
+
+```bash
+npm install -g gmgn-cli
+```
+
+**Get an API key:**
+
+1. Generate an Ed25519 key pair:
+   ```bash
+   openssl genpkey -algorithm Ed25519 -out gmgn_private.pem
+   openssl pkey -in gmgn_private.pem -pubout -out gmgn_public.pem
+   cat gmgn_public.pem
+   ```
+2. Go to [gmgn.ai/ai](https://gmgn.ai/ai), upload the public key, and enable **Reading** permissions.
+3. Copy the generated API key and add it to `.env`:
+   ```env
+   GMGN_API_KEY=gmgn_...
+   ```
+
+Keep `gmgn_private.pem` secure — both `.pem` files are gitignored.
 
 ### 3. Run
 

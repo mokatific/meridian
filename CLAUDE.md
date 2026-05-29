@@ -45,12 +45,20 @@ tools/
   chart-indicators.js RSI/Bollinger/Supertrend/Fibonacci preset evaluation
   agent-meridian.js   Helper for the Agent Meridian relay API
   okx.js              OKX advanced-info, cluster list, price info via relay or direct API
+  gmgn.js             GMGN smart money/KOL trade tracking + token info via gmgn-cli
 
 utils/
   rpc-cache.js        RPC Connection proxy: TTL cache + failover + sendAndConfirmPolling (HTTP polling)
   datapi-limiter.js   Rate-limited fetch wrapper for datapi.jup.ag
   lessonManager.js    Lesson scoring, feedback loop, auto-pruning
 ```
+
+## External Binaries
+
+| Binary     | Install                                                                          | Required for                                                                                                                                                                                                                                            |
+| ---------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gmgn-cli` | `npm install -g gmgn-cli`                                                        | Smart money signals, KOL trades, token fee data. Requires `GMGN_API_KEY` in `.env`. Get key: generate Ed25519 keypair with OpenSSL, upload public key at [gmgn.ai/ai](https://gmgn.ai/ai), enable Reading. Fail-open: skipped if missing or key absent. |
+| `twitter`  | [github.com/public-clis/twitter-cli](https://github.com/public-clis/twitter-cli) | Twitter KOL wallet discovery (`discoverTwitterWallets=true`). Fail-open: cron skipped with log warning if binary missing.                                                                                                                               |
 
 ---
 

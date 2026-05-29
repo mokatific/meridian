@@ -350,6 +350,18 @@ export function detectClusterSignals(trades, windowMinutes = DEFAULT_WINDOW_MINU
 }
 
 /**
+ * Fetch token info from GMGN for a specific mint.
+ * Returns the raw token info object or null on error.
+ * total_fee field = cumulative SOL fees paid by traders (scam/bundle signal).
+ */
+export async function fetchGmgnTokenInfo(mint) {
+  if (!mint) return null;
+  const raw = await runGmgnCli(`token info --chain sol --address ${mint}`);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return raw;
+}
+
+/**
  * Check GMGN signals for a specific token.
  * Returns aggregated signal data from cached trades.
  *

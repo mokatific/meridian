@@ -107,3 +107,5 @@ memory/
 dashboard/.next/
 dashboard/node_modules/
 dashboard/.env.local
+gmgn_private.pem
+gmgn_public.pem
