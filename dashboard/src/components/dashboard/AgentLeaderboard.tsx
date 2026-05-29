@@ -63,8 +63,9 @@ function AgentDetail({
 
   return (
     <div className="mt-2 space-y-3 rounded-lg border border-zinc-700 bg-zinc-900/80 p-3">
-      <div className="flex items-center gap-2 text-xs text-zinc-500">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
         <span className="font-mono text-zinc-300 font-medium">{agent.id}</span>
+        <span className="font-mono text-zinc-600 text-xs">(agt_{agent.id.slice(6)}…)</span>
         <span>·</span>
         <span>win rate <span className={winRateColor(agent.winRatePct)}>{agent.winRatePct}%</span></span>
         <span>·</span>
@@ -166,7 +167,13 @@ export function AgentLeaderboard() {
   const agents: GraphAgent[] = useMemo(() => {
     if (!data?.graph.agents) return []
     return [...data.graph.agents]
-      .filter(a => !search || a.id.includes(search.toLowerCase()))
+      .filter(a => {
+        if (!search) return true
+        const q = search.toLowerCase()
+        // Support full agt_XXXXXX format — convert to agent-XXXXXX short form for matching
+        const normalized = q.startsWith('agt_') ? 'agent-' + q.slice(4, 10) : q
+        return a.id.includes(normalized)
+      })
       .sort((a, b) => sortBy === 'winRate' ? b.winRatePct - a.winRatePct : a.id.localeCompare(b.id))
   }, [data, search, sortBy])
 
