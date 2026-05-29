@@ -30,8 +30,10 @@ export async function getTokenInfo({ query }) {
   // Try official API first
   try {
     const tokens = await searchTokenOfficial({ query });
-    if (tokens.length > 0) {
-      const results = tokens.slice(0, 5).map(mapOfficialToScreening);
+    const validTokens = tokens.filter((t) => t?.id || t?.mint);
+    if (validTokens.length === 0) throw new Error("no valid results from official API");
+    if (validTokens.length > 0) {
+      const results = validTokens.slice(0, 5).map(mapOfficialToScreening);
       // Enrich first result with OKX smart money + risk data
       if (results[0]?.mint) {
         const { getAdvancedInfo, getClusterList } = await import("./okx.js");
