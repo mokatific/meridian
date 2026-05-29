@@ -1916,6 +1916,9 @@ function getDeterministicCloseRule(position, managementConfig) {
   const tracked = getTrackedPosition(position.position);
   const pnlSuspect = (() => {
     if (position.pnl_pct == null) return false;
+    // Prefer the flag already set by getMyPositions (cross-checked against pnlSanityMaxDiffPct)
+    if (position.pnl_pct_suspicious) return true;
+    // Fallback heuristic: <= -90% on a position that still has value is almost certainly stale data
     if (position.pnl_pct > -90) return false;
     if (tracked?.amount_sol && (position.total_value_usd ?? 0) > 0.01) {
       log(

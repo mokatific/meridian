@@ -861,9 +861,14 @@ async function runSafetyChecks(name, args) {
           };
         }
       }
+      // pct-mode only bypasses explicit bin checks when bins_below/bins_above are absent —
+      // matching the usePctRange condition in dlmm.js so the two layers stay in sync.
+      const usingPctRange =
+        (args.downside_pct != null || args.upside_pct != null) &&
+        args.bins_below == null &&
+        args.bins_above == null;
       if (
-        args.downside_pct == null &&
-        args.upside_pct == null &&
+        !usingPctRange &&
         (!Number.isFinite(requestedBinsBelow) ||
           !Number.isFinite(requestedBinsAbove) ||
           !Number.isInteger(requestedBinsBelow) ||
@@ -879,7 +884,7 @@ async function runSafetyChecks(name, args) {
       }
       if (
         isSingleSidedSol &&
-        args.downside_pct == null &&
+        !usingPctRange &&
         (!Number.isFinite(requestedBinsBelow) ||
           !Number.isInteger(requestedBinsBelow) ||
           requestedBinsBelow < minBinsBelow)

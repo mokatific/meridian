@@ -63,7 +63,7 @@ async function fetchPoolDetail(poolAddress) {
  * open time to detect the price-scale offset between datapi's pool price and
  * the OHLCV feed (token-decimal differences cause ~1000x discrepancies).
  */
-async function fetchLatestCandleClose(poolAddress) {
+async function fetchLatestCandle(poolAddress) {
   const url = `${GECKO_BASE}/networks/solana/pools/${poolAddress}/ohlcv/minute?aggregate=5&limit=1&currency=usd`;
   const res = await fetch(url, { headers: { accept: "application/json" } });
   if (!res.ok) throw new Error(`GeckoTerminal ${res.status}`);
@@ -71,7 +71,9 @@ async function fetchLatestCandleClose(poolAddress) {
   const row = data?.data?.attributes?.ohlcv_list?.[0];
   if (!row) return null;
   const close = Number(row[4]);
-  return Number.isFinite(close) && close > 0 ? close : null;
+  const ts = Number(row[0]) * 1000;
+  if (!Number.isFinite(close) || close <= 0) return null;
+  return { close, ts: Number.isFinite(ts) ? ts : null };
 }
 
 /**
@@ -93,7 +95,7 @@ async function fetchRecentCandles(poolAddress, limit = MAX_CANDLES_PER_TICK) {
       close: Number(row[4]),
       volume: Number(row[5]),
     }))
-    .filter((c) => Number.isFinite(c.close) && c.close > 0)
+    .filter((c) => Number.isFinite(c.close) && c.close > 0 && Number.isFinite(c.volume))
     .sort((a, b) => a.ts - b.ts);
 }
 
@@ -266,10 +268,11 @@ export async function openPaperPosition({
     throw new Error(`strategy must be one of: ${[...STRATEGIES].join(", ")}`);
   }
 
-  const [pool, latestCandleClose] = await Promise.all([
+  const [pool, latestCandle] = await Promise.all([
     fetchPoolDetail(pool_address),
-    fetchLatestCandleClose(pool_address).catch(() => null),
+    fetchLatestCandle(pool_address).catch(() => null),
   ]);
+  const latestCandleClose = latestCandle?.close ?? null;
   const binStep = num(pool?.dlmm_params?.bin_step ?? pool?.pool_config?.bin_step, null);
   if (!(binStep > 0)) throw new Error("Could not read pool bin_step");
   const feePct = num(pool?.fee_pct ?? pool?.base_fee_pct, null);
@@ -335,7 +338,7 @@ export async function openPaperPosition({
     liquidity: L,
     x_initial: xTokens,
     y_initial_usd: round(yUsd, 4),
-    last_candle_timestamp: now,
+    last_candle_timestamp: latestCandle?.ts ?? now,
     last_price: entryPrice,
     last_tick_at: null,
     fees_earned_usd: 0,
