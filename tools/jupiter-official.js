@@ -3,7 +3,7 @@
  * Replaces datapi.jup.ag where possible to avoid 403 rate limits.
  *
  * Mapping:
- *   datapi.jup.ag/v1/assets/search    → api.jup.ag/tokens/v2/tag?query=...
+ *   datapi.jup.ag/v1/assets/search    → api.jup.ag/tokens/v2/search?query=...
  *   datapi.jup.ag/v1/holders/{mint}   → api.jup.ag/tokens/v2/tag?query={mint} (holderCount only)
  *   datapi.jup.ag/v1/chaininsight     → No official alternative (kept as-is with rate limiter)
  */
@@ -17,7 +17,7 @@ const JUPITER_TOKENS_V2 = "https://api.jup.ag/tokens/v2";
  * Returns data compatible with existing screening pipeline.
  */
 export async function searchTokenOfficial({ query }) {
-  const url = `${JUPITER_TOKENS_V2}/tag?query=${encodeURIComponent(query)}`;
+  const url = `${JUPITER_TOKENS_V2}/search?query=${encodeURIComponent(query)}`;
   const res = await fetchWithJupiterKey(url);
   if (!res.ok) throw new Error(`Jupiter Tokens v2 error: ${res.status}`);
   const data = await res.json();
