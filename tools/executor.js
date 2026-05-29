@@ -852,6 +852,15 @@ async function runSafetyChecks(name, args) {
           reason: `volatility ${args.volatility} is invalid. Refusing deploy because the volatility feed is unusable.`,
         };
       }
+      if (args.downside_pct != null) {
+        const dp = Number(args.downside_pct);
+        if (!Number.isFinite(dp) || dp <= 0) {
+          return {
+            pass: false,
+            reason: `downside_pct=${args.downside_pct} is invalid — must be a positive number (e.g. 5 for 5% downside). Use bins_below instead.`,
+          };
+        }
+      }
       if (
         args.downside_pct == null &&
         args.upside_pct == null &&

@@ -624,7 +624,11 @@ async function _deployPositionInner({
   const actualBinStep = pool.lbPair.binStep;
   const activePrice = Number(getPriceOfBinByBinId(activeBin.binId, actualBinStep).toString());
 
-  if (downside_pct != null || upside_pct != null) {
+  // bins_below/bins_above take precedence over downside_pct/upside_pct when both are provided.
+  // This prevents downside_pct=0 silently overriding an intentional bins_below value.
+  const usePctRange =
+    (downside_pct != null || upside_pct != null) && bins_below == null && bins_above == null;
+  if (usePctRange) {
     const downsidePct = Math.max(0, Number(downside_pct ?? 0));
     const upsidePct = Math.max(0, Number(upside_pct ?? 0));
 
