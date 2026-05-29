@@ -460,11 +460,17 @@ function _generateLessons(findings, recommendations, sampleCount) {
 
 // ─── Utilities ─────────────────────────────────────────────────
 
+function getTotalReturnPct(p) {
+  if (p.total_return_pct != null) return p.total_return_pct;
+  const feePct =
+    p.initial_value_usd > 0 ? ((p.fees_earned_usd || 0) / p.initial_value_usd) * 100 : 0;
+  return (p.pnl_pct ?? 0) + feePct;
+}
 function winRate(g) {
-  return g.length ? g.filter((p) => (p.pnl_pct ?? 0) > 0).length / g.length : 0;
+  return g.length ? g.filter((p) => getTotalReturnPct(p) > 0).length / g.length : 0;
 }
 function avgPnl(g) {
-  return g.length ? Math.round(avg(g.map((p) => p.pnl_pct ?? 0)) * 100) / 100 : 0;
+  return g.length ? Math.round(avg(g.map((p) => getTotalReturnPct(p))) * 100) / 100 : 0;
 }
 function avgFees(g) {
   const v = g.map((p) => p.fees_earned_usd ?? 0).filter((x) => x != null);

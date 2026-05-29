@@ -99,9 +99,12 @@ export async function recordPerformance(perf) {
     return;
   }
 
-  // final_value_usd already includes fees (from dry-run-simulator: initial + pnl_usd where pnl includes fees)
   const pnl_usd = perf.final_value_usd - perf.initial_value_usd;
   const pnl_pct = perf.initial_value_usd > 0 ? (pnl_usd / perf.initial_value_usd) * 100 : 0;
+  // total_return includes both capital change and fees — what the position actually earned
+  const total_return_usd = pnl_usd + (perf.fees_earned_usd || 0);
+  const total_return_pct =
+    perf.initial_value_usd > 0 ? (total_return_usd / perf.initial_value_usd) * 100 : pnl_pct;
   const range_efficiency =
     perf.minutes_held > 0 ? (perf.minutes_in_range / perf.minutes_held) * 100 : 0;
 
@@ -124,6 +127,7 @@ export async function recordPerformance(perf) {
     ...perf,
     pnl_usd: Math.round(pnl_usd * 100) / 100,
     pnl_pct: Math.round(pnl_pct * 100) / 100,
+    total_return_pct: Math.round(total_return_pct * 100) / 100,
     range_efficiency: Math.round(range_efficiency * 10) / 10,
     close_reason_category: normalizeCloseReason(perf.close_reason),
     recorded_at: new Date().toISOString(),
@@ -229,18 +233,14 @@ function derivLesson(perf) {
   const tags = [];
   const feeYieldPct =
     perf.initial_value_usd > 0 ? ((perf.fees_earned_usd || 0) / perf.initial_value_usd) * 100 : 0;
+  // Use total_return_pct (fees + capital change) for outcome classification; fall back to
+  // computing it inline for old records that predate this field.
+  const tr =
+    perf.total_return_pct ?? (perf.pnl_pct ?? 0) + (perf.initial_value_usd > 0 ? feeYieldPct : 0);
 
   // Categorize outcome
   const outcome =
-    perf.pnl_pct >= 5
-      ? "good"
-      : perf.pnl_pct >= 0 && feeYieldPct >= 2
-        ? "good"
-        : perf.pnl_pct >= 0
-          ? "neutral"
-          : perf.pnl_pct >= -5
-            ? "poor"
-            : "bad";
+    tr >= 5 ? "good" : tr >= 2 ? "good" : tr >= 0 ? "neutral" : tr >= -5 ? "poor" : "bad";
 
   if (outcome === "neutral") return null; // nothing interesting to learn
 
@@ -329,8 +329,14 @@ function derivLesson(perf) {
 export function evolveThresholds(perfData, config) {
   if (!perfData || perfData.length < MIN_EVOLVE_POSITIONS) return null;
 
-  const winners = perfData.filter((p) => p.pnl_pct > 0);
-  const losers = perfData.filter((p) => p.pnl_pct < -5);
+  // Use total return (fees + capital change) so positions with minor IL but strong fee yield
+  // count as winners rather than being misclassified as losers.
+  const getTR = (p) =>
+    p.total_return_pct ??
+    (p.pnl_pct ?? 0) +
+      (p.initial_value_usd > 0 ? ((p.fees_earned_usd || 0) / p.initial_value_usd) * 100 : 0);
+  const winners = perfData.filter((p) => getTR(p) > 0);
+  const losers = perfData.filter((p) => getTR(p) < -5);
 
   // Need at least some signal in both directions before adjusting
   const hasSignal = winners.length >= 2 || losers.length >= 2;

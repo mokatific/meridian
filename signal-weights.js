@@ -128,9 +128,10 @@ export function recalculateWeights(perfData, cfg = {}) {
     return { changes: [], weights };
   }
 
-  // Classify wins and losses
-  const wins = recent.filter((p) => (p.pnl_usd ?? 0) > 0);
-  const losses = recent.filter((p) => (p.pnl_usd ?? 0) <= 0);
+  // Classify wins and losses by total return (capital change + fees)
+  const totalReturnUsd = (p) => (p.pnl_usd ?? 0) + (p.fees_earned_usd ?? 0);
+  const wins = recent.filter((p) => totalReturnUsd(p) > 0);
+  const losses = recent.filter((p) => totalReturnUsd(p) <= 0);
 
   if (wins.length === 0 || losses.length === 0) {
     log(
