@@ -1,6 +1,5 @@
 'use client'
 
-import dynamic from 'next/dynamic'
 import { useEffect } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useHivemindLessons } from '@/hooks/useHivemindLessons'
@@ -12,11 +11,6 @@ import { HivemindFeed } from './HivemindFeed'
 import { PoolLeaderboard } from './PoolLeaderboard'
 import { PoolIntelligence } from './PoolIntelligence'
 import { WalletDeepDive } from './WalletDeepDive'
-
-const OhlcvChart = dynamic(() => import('./OhlcvChart').then(m => ({ default: m.OhlcvChart })), {
-  ssr: false,
-  loading: () => <div className="h-96 rounded-lg bg-zinc-900 animate-pulse" />,
-})
 
 export function DashboardTabs() {
   const { data: lessonsData, isLoading: lessonsLoading } = useHivemindLessons(80)
@@ -33,7 +27,6 @@ export function DashboardTabs() {
   return (
     <Tabs defaultValue="network" className="space-y-4">
       <TabsList className="bg-zinc-900 border border-zinc-800 h-9 flex-wrap gap-px">
-        {/* Auto-loading tabs — no user input required */}
         <TabsTrigger value="network" className="text-xs data-[state=active]:bg-zinc-700">
           🌐 Network
           {activeCount && <span className="ml-1.5 rounded-full bg-zinc-700 px-1.5 py-px text-xs text-zinc-300">{activeCount}</span>}
@@ -52,15 +45,11 @@ export function DashboardTabs() {
         <TabsTrigger value="pools" className="text-xs data-[state=active]:bg-zinc-700">
           🌊 Pools
         </TabsTrigger>
-        {/* Manual research tabs */}
         <TabsTrigger value="leaderboard" className="text-xs data-[state=active]:bg-zinc-700">
           🏆 LP Leaderboard
         </TabsTrigger>
         <TabsTrigger value="wallet" className="text-xs data-[state=active]:bg-zinc-700">
           🔍 Wallet Dive
-        </TabsTrigger>
-        <TabsTrigger value="chart" className="text-xs data-[state=active]:bg-zinc-700">
-          📈 Chart
         </TabsTrigger>
       </TabsList>
 
@@ -90,10 +79,6 @@ export function DashboardTabs() {
 
       <TabsContent value="wallet" className="mt-0">
         <WalletDeepDive />
-      </TabsContent>
-
-      <TabsContent value="chart" className="mt-0">
-        <OhlcvChart />
       </TabsContent>
     </Tabs>
   )
