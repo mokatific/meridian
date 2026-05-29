@@ -145,25 +145,25 @@ function computeInitialSplit({ amountUsd, activePrice, lowerPrice, upperPrice })
 }
 
 /**
- * IL for a concentrated-liquidity LP position, as a deposit-relative ratio.
+ * Concentrated-liquidity IL in USD.
  *
- *   IL_ratio = (2√r / (1 + r) - 1) × √(upperPrice / lowerPrice)
+ * IL = LP_value(currentPrice) − HODL_value(currentPrice)
  *
- * where r = effectivePrice / entryPrice, with effectivePrice clamped to
- * [lowerPrice, upperPrice] so price excursions outside the range stop
- * contributing further loss. Multiply by the deposit amount to get USD.
+ * HODL: hold the initial token split without providing liquidity.
+ *   hodlValue = xInitial × currentPrice + yInitialUsd
  *
- * Replaces the old USD-fraction rebalance that silently summed to the
- * deposit amount when entry == upper (single-side SOL), masking real IL.
+ * LP value is computed via computeLpValue (sqrt-price geometry, already used
+ * for current_value_usd). This is the standard v3 approach and correctly
+ * returns 0 IL when price hasn't moved from the entry price.
+ *
+ * Note: yInitialUsd is denominated in the OHLCV price scale (same as
+ * currentPrice), so the arithmetic is self-consistent. SOL price drift is
+ * not captured separately — IL is relative to the initial deposit value.
  */
-function computeIlRatio({ entryPrice, currentPrice, lowerPrice, upperPrice }) {
-  if (!(entryPrice > 0) || !(lowerPrice > 0) || !(upperPrice > 0)) return 0;
-  const effective = Math.min(Math.max(currentPrice, lowerPrice), upperPrice);
-  const r = effective / entryPrice;
-  if (!(r > 0)) return 0;
-  const baseIl = (2 * Math.sqrt(r)) / (1 + r) - 1;
-  const rangeMultiplier = Math.sqrt(upperPrice / lowerPrice);
-  return baseIl * rangeMultiplier;
+function computeIlUsd({ lpValueUsd, xInitial, yInitialUsd, currentPrice, initialValueUsd }) {
+  if (!(initialValueUsd > 0)) return 0;
+  const hodlValueUsd = xInitial * currentPrice + yInitialUsd;
+  return lpValueUsd - hodlValueUsd;
 }
 
 /**
@@ -304,7 +304,11 @@ export async function openPaperPosition({
     upperPrice,
   });
 
-  const tvlShare = poolTvlUsd > 0 ? initialValueUsd / (poolTvlUsd + initialValueUsd) : 1;
+  // When poolTvlUsd is 0 (new pool or API error), use the position's own value as
+  // the TVL floor so tvl_share caps at 0.5 rather than 1, avoiding fee over-statement
+  // on pools where the API returned zero due to a transient error.
+  const effectiveTvl = Math.max(poolTvlUsd, initialValueUsd);
+  const tvlShare = initialValueUsd / (effectiveTvl + initialValueUsd);
 
   const now = Date.now();
   const id = newId(pool_address);
@@ -436,14 +440,14 @@ async function tickOne(pos) {
     upperPrice: pos.upper_price,
     currentPrice: latestPrice,
   });
-  const ilRatio = computeIlRatio({
-    entryPrice: pos.entry_price ?? pos.active_price,
+  const ilUsd = computeIlUsd({
+    lpValueUsd: lp.valueUsd,
+    xInitial: pos.x_initial,
+    yInitialUsd: pos.y_initial_usd,
     currentPrice: latestPrice,
-    lowerPrice: pos.lower_price,
-    upperPrice: pos.upper_price,
+    initialValueUsd: pos.initial_value_usd,
   });
-  const ilUsd = pos.initial_value_usd * ilRatio;
-  const ilPct = ilRatio * 100;
+  const ilPct = pos.initial_value_usd > 0 ? (ilUsd / pos.initial_value_usd) * 100 : 0;
   const netPnl = feesUsd + ilUsd;
 
   return {

@@ -151,6 +151,7 @@ function buildPrompt() {
 let _cronTasks = [];
 let _managementBusy = false; // prevents overlapping management cycles
 let _screeningBusy = false; // prevents overlapping screening cycles
+let _pnlPollBusy = false; // module-level so runManagementCycle can guard against concurrent poller writes
 let _screeningLastTriggered = 0; // epoch ms — prevents management from spamming screening
 let _pollTriggeredAt = 0; // epoch ms — cooldown for poller-triggered management
 let _pnlPollLastRunAt = 0; // epoch ms — minimum spacing for RPC-heavy PnL polling
@@ -346,7 +347,16 @@ function schedulePeakConfirmation(positionAddress) {
     _peakConfirmTimers.delete(positionAddress);
     try {
       const result = await getMyPositions({ force: true, silent: true }).catch(() => null);
-      const position = result?.positions?.find((p) => p.position === positionAddress);
+      if (!result) {
+        // API outage during the 15s recheck — leave pending_peak intact so the
+        // next management cycle can confirm or reject it with fresh data.
+        log(
+          "state_warn",
+          `Peak confirmation skipped for ${positionAddress}: getMyPositions unavailable`,
+        );
+        return;
+      }
+      const position = result.positions?.find((p) => p.position === positionAddress);
       resolvePendingPeak(
         positionAddress,
         position?.pnl_pct ?? null,
@@ -435,6 +445,15 @@ function stopCronJobs() {
 
 export async function runManagementCycle({ silent = false } = {}) {
   if (_managementBusy) return null;
+  // If the 30s poller is mid-write to state.js, wait for it to finish before we
+  // do our own read-modify-write cycle. Poller ticks take < 2s; 50ms polls are fine.
+  if (_pnlPollBusy) {
+    const deadline = Date.now() + 3000;
+    while (_pnlPollBusy && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  if (_managementBusy) return null; // re-check after waiting
   _managementBusy = true;
   timers.managementLastRun = Date.now();
   log("cron", "Starting management cycle");
@@ -1521,7 +1540,6 @@ Summarize the current portfolio health, total fees earned, and performance of al
   );
 
   // Lightweight 30s PnL poller — updates trailing TP state between management cycles, no LLM
-  let _pnlPollBusy = false;
   const pnlPollInterval = setInterval(async () => {
     const now = Date.now();
     if (now - _pnlPollLastRunAt < PNL_POLL_MIN_INTERVAL_MS) {
