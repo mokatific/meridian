@@ -1,5 +1,5 @@
 # ============================================
-# Node / Yarn
+# Node / npm / Yarn
 # ============================================
 node_modules/
 yarn-error.log
@@ -7,6 +7,19 @@ yarn-error.log
 **/.yarn/unplugged
 **/.yarn/build-state.yml
 **/.yarn/install-state.gz
+
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.ruff_cache
 
 # ============================================
 # Editor / IDE
@@ -25,17 +38,17 @@ yarn-error.log
 Thumbs.db
 
 # ============================================
-# Environment & Configuration
+# Environment & Secrets
 # ============================================
 .env
 .env.*
 !.env.example
 .envrypt
-user-config.json
 
 # ============================================
-# Runtime state
+# Runtime State
 # ============================================
+user-config.json
 state.json
 lessons.json
 smart-wallets.json
@@ -43,10 +56,19 @@ pool-memory.json
 token-blacklist.json
 strategy-library.json
 decision-log.json
+gmgn-cache.json
 hivemind-cache.json
 signal-weights.json
 skipped-pools.json
 paper-positions.json
+dev-blocklist.json
+discord-signals.json
+virtual-positions.json
+causal-analysis.json
+position-journal.db
+position-journal.db-shm
+position-journal.db-wal
+config-snapshots.json
 
 # ============================================
 # Logs
@@ -54,59 +76,26 @@ paper-positions.json
 logs/
 
 # ============================================
-# Dev context
-# ============================================
-context.md
-CONTEXT.md
-dev-blocklist.json
-docs/
-
-# ============================================
-# Discord listener queue
-# ============================================
-discord-signals.json
-
-# ============================================
-# Playwright MCP browser logs
-# ============================================
-.playwright-mcp/
-
-# ============================================
-# Claude Code
-# ============================================
-.claude/scheduled_tasks.lock
-memory/
-
-# ============================================
-# Backup files
-# ============================================
-backup/
-*.backup
-
-# ============================================
 # Telegram
 # ============================================
 telegram-history/*
 
 # ============================================
-# Runtime virtual positions
+# Backup
 # ============================================
-virtual-positions.json
-causal-analysis.json
-position-journal.db
-position-journal.db-shm
-position-journal.db-wal
+backup/
+*.backup
 
 # ============================================
-# Python
+# Docs / Dev context
 # ============================================
-__pycache__/
-*.py[cod]
-*.so
-.Python
-env/
-venv/
-.venv/
-*.egg-info/
-.ruff_cache
-config-snapshots.json
+context.md
+CONTEXT.md
+docs/
+
+# ============================================
+# Claude Code / MCP
+# ============================================
+.claude/scheduled_tasks.lock
+memory/
+.playwright-mcp/
