@@ -97,8 +97,9 @@ docs/
 # Claude Code / MCP
 # ============================================
 .claude/scheduled_tasks.lock
-memory/
+.codegraph/
 .playwright-mcp/
+memory/
 
 # ============================================
 # Dashboard (Next.js)
