@@ -9,7 +9,7 @@ import { useSolanaWallet } from '@/hooks/useSolanaWallet'
 import type { MeteoraPositionPnl } from '@/lib/types'
 import { cn, shortAddr, fmtUsd, fmtPct } from '@/lib/utils'
 
-function PositionCard({ pos }: { pos: MeteoraPositionPnl }) {
+function PositionCard({ pos, poolAddress }: { pos: MeteoraPositionPnl; poolAddress: string }) {
   const created = pos.createdAt ? new Date(pos.createdAt * 1000) : null
   const closed = pos.closedAt ? new Date(pos.closedAt * 1000) : null
   const ageMs = created && closed ? closed.getTime() - created.getTime() : null
@@ -19,7 +19,9 @@ function PositionCard({ pos }: { pos: MeteoraPositionPnl }) {
     <div className={cn('rounded-lg border p-3 text-xs', pos.pnlPctChange >= 0 ? 'border-green-900/50 bg-green-950/20' : 'border-red-900/50 bg-red-950/20')}>
       <div className="flex items-start justify-between">
         <div>
-          <span className="font-mono text-zinc-400">{shortAddr(pos.positionAddress)}</span>
+          <a href={`https://www.meteora.ag/dlmm/${poolAddress}`} target="_blank" rel="noreferrer" className="font-mono text-zinc-400 hover:text-blue-400">
+        {shortAddr(pos.positionAddress)}
+      </a>
           {pos.isOutOfRange && <span className="ml-2 rounded bg-amber-900/40 px-1.5 text-amber-400">OOR</span>}
           {pos.isClosed && <span className="ml-2 rounded bg-zinc-800 px-1.5 text-zinc-500">closed</span>}
         </div>
@@ -167,7 +169,7 @@ export function WalletDeepDive() {
           {positions.length > 0 && (
             <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
               <p className="text-xs text-zinc-600">{positions.length} positions</p>
-              {positions.map(pos => <PositionCard key={pos.positionAddress} pos={pos} />)}
+              {positions.map(pos => <PositionCard key={pos.positionAddress} pos={pos} poolAddress={pool} />)}
             </div>
           )}
 

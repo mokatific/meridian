@@ -77,7 +77,14 @@ export function PoolLeaderboard() {
 
       {topData?.overview && (
         <div className="flex flex-wrap gap-3 text-xs text-zinc-500">
-          <span className="text-zinc-300 font-medium">{topData.overview.tokenXSymbol}-{topData.overview.tokenYSymbol}</span>
+          <a
+            href={`https://www.meteora.ag/dlmm/${pool}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-zinc-300 font-medium hover:text-blue-400"
+          >
+            {topData.overview.tokenXSymbol}-{topData.overview.tokenYSymbol} ↗
+          </a>
           {topData.overview.tvl != null && <span>TVL {fmtUsd(topData.overview.tvl)}</span>}
           {topData.overview.feePct != null && <span>Fee {topData.overview.feePct}%</span>}
           {topData.overview.binStep != null && <span>Bin step {topData.overview.binStep}</span>}

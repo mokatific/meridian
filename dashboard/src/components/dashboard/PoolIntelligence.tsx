@@ -64,7 +64,14 @@ function PoolCard({ pool }: { pool: MeteoraPool }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-zinc-200 truncate">{pool.name}</span>
+            <a
+              href={`https://www.meteora.ag/dlmm/${pool.pool_address}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm font-medium text-zinc-200 hover:text-blue-400 truncate"
+            >
+              {pool.name}
+            </a>
             {pool.dlmm_params?.bin_step && (
               <span className="text-xs text-zinc-600">bs {pool.dlmm_params.bin_step}</span>
             )}
@@ -131,7 +138,7 @@ function PoolCard({ pool }: { pool: MeteoraPool }) {
           {base?.market_cap && <div><span className="text-zinc-600">Base MCap</span><br /><span className="text-zinc-300">{fmtUsd(base.market_cap)}</span></div>}
           {base?.holders && <div><span className="text-zinc-600">Holders</span><br /><span className="text-zinc-300">{base.holders.toLocaleString()}</span></div>}
           <div>
-            <a href={`https://app.meteora.ag/dlmm/${pool.pool_address}`} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-zinc-400">↗ Meteora</a>
+            <a href={`https://www.meteora.ag/dlmm/${pool.pool_address}`} target="_blank" rel="noreferrer" className="text-zinc-600 hover:text-zinc-400">↗ Meteora</a>
           </div>
         </div>
       )}

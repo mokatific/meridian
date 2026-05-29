@@ -74,7 +74,11 @@ function CopyBtn({ value }: { value: string }) {
 function PositionRow({ pos }: { pos: HistoricalPosition }) {
   return (
     <tr className="border-b border-zinc-800/40 hover:bg-zinc-800/20 text-xs">
-      <td className="py-1.5 px-2 font-mono text-zinc-500">{shortAddr(pos.position)}</td>
+      <td className="py-1.5 px-2 font-mono text-zinc-500">
+        <a href={`https://www.meteora.ag/dlmm/${pos.pool}`} target="_blank" rel="noreferrer" className="hover:text-blue-400">
+          {shortAddr(pos.position)}
+        </a>
+      </td>
       <td className="py-1.5 px-2">
         <span className={cn('rounded px-1.5 py-px text-xs', pos.strategy === 'spot' ? 'bg-blue-900/50 text-blue-300' : pos.strategy === 'bid_ask' ? 'bg-purple-900/50 text-purple-300' : 'bg-zinc-800 text-zinc-400')}>
           {pos.strategy}
