@@ -1,3 +1,111 @@
+// ─── HiveMind Public Summary ──────────────────────────────────────────────────
+
+export interface NetworkOverview {
+  activeAgents: number
+  registeredAgents: number
+  totalLessons: number
+  sampleCount: number
+  adjustedSampleCount: number
+  totalPnlUsd: number
+  totalFeesUsd: number
+  avgPnlPct: number
+  avgHoldMinutes: number
+  winRatePct: number
+  adjustedWinRatePct: number
+  rawEventFeesUsd: number
+  syncedWalletFeesUsd: number
+  syncedWalletFeesSol: number
+  feeSource: string
+  feeSyncedAgents: number
+  feeUnsyncedAgents: number
+}
+
+export interface PoolStat {
+  pool: string
+  sampleCount: number
+  adjustedSampleCount: number
+  totalPnlUsd: number
+  totalFeesUsd: number
+  avgPnlPct: number
+  avgHoldMinutes: number
+  winRatePct: number
+  adjustedWinRatePct: number
+}
+
+export interface StrategyStat {
+  strategy: string
+  sampleCount: number
+  adjustedSampleCount: number
+  totalPnlUsd: number
+  totalFeesUsd: number
+  avgPnlPct: number
+  avgHoldMinutes: number
+  winRatePct: number
+  adjustedWinRatePct: number
+}
+
+export interface DayTrend {
+  date: string
+  pnlUsd: number
+  feesUsd: number
+  closes: number
+}
+
+export interface SummaryLesson {
+  id: string
+  consensusKey: string
+  rule: string
+  role: string | null
+  tags: string[]
+  score: number
+  consensus: 'strong' | 'emerging' | 'disputed'
+  distinctAgents: number
+  sampleCount: number
+  confidence: number
+  created_at?: string
+  outcome?: string
+  sourceType?: string
+  agentIds?: string[]   // present in graph.lessons only
+  label?: string
+}
+
+export interface GraphAgent {
+  id: string
+  label: string
+  winRatePct: number
+}
+
+export interface GraphEdge {
+  from: string   // agent-XXXXXX
+  to: string     // lesson id
+  tooltip: string
+}
+
+export interface TerminalEvent {
+  at: string
+  line: string
+  type: 'performance' | 'lesson' | string
+}
+
+export interface PublicSummary {
+  updatedAt: string
+  overview: NetworkOverview
+  topPools: PoolStat[]
+  topStrategies: StrategyStat[]
+  recentTrend: DayTrend[]
+  consensus: {
+    strong: SummaryLesson[]
+    emerging: SummaryLesson[]
+    disputed: SummaryLesson[]
+  }
+  graph: {
+    agents: GraphAgent[]
+    lessons: SummaryLesson[]
+    edges: GraphEdge[]
+  }
+  terminalFeed: TerminalEvent[]
+}
+
 // ─── HiveMind ─────────────────────────────────────────────────────────────────
 
 export interface Lesson {
