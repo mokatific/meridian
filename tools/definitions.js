@@ -141,6 +141,7 @@ HARD RULES:
 - Range must cover at least 35 total bins. Never deploy 1-bin/tiny ranges.
 - For single-side SOL deploys (amount_y only, amount_x=0), do not request upside exposure:
   use bins_below only, keep bins_above=0, and the upper bin will be pinned to the current active bin.
+- NEVER pass downside_pct=0 or upside_pct=0. If you are using bins_below, omit downside_pct entirely.
 
 Guidelines (only when user hasn't specified):
 - Strategy: Use strategy_hint when provided; otherwise omit strategy to fall back to config.
@@ -181,7 +182,7 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
           downside_pct: {
             type: "number",
             description:
-              "Optional human-friendly downside range in percent below the current active price. Converted to bins internally via the Meteora SDK.",
+              "Optional human-friendly downside range in percent below the current active price. Converted to bins internally. OMIT this field entirely when using bins_below — never pass 0.",
           },
           upside_pct: {
             type: "number",
