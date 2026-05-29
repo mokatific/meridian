@@ -20,6 +20,7 @@ import { fileURLToPath } from "url";
 import { log } from "./logger.js";
 import { logPositionClose, initLogger } from "./position-logger.js";
 import { config } from "./config.js";
+import { pushHivePerformanceEvent, isHiveMindEnabled } from "./hivemind.js";
 import { addToBlacklist } from "./token-blacklist.js";
 import { blockDev } from "./dev-blocklist.js";
 import { Connection, PublicKey } from "@solana/web3.js";
@@ -473,6 +474,27 @@ async function _closeVirtualPosition(pos, evaluation) {
   // Skipped in dry-run — virtual closes must not pollute lessons.json,
   // pool-memory.json, signal-weights.json, or threshold evolution used by live trading.
   // History is kept in virtual-positions.json only.
+
+  // ── Push to HiveMind network ───────────────────────────────────
+  // Safe to push dry-run performance to the remote HiveMind — this contributes
+  // to collective intelligence without touching local live-trading state.
+  if (isHiveMindEnabled()) {
+    void pushHivePerformanceEvent({
+      eventId: `close:${config.hiveMind?.agentId || "agent-local"}:${pos.position}:${Date.now()}`,
+      position: pos.position,
+      pool: pos.pool,
+      pool_name: pos.pool_name,
+      base_mint: pos.base_mint || null,
+      strategy: pos.strategy || null,
+      close_reason: evaluation.reason,
+      pnl_usd: evaluation.pnl_usd || 0,
+      pnl_pct: evaluation.pnl_pct || 0,
+      fees_earned_usd: evaluation.fees_usd || 0,
+      fees_earned_sol: 0,
+      minutes_held: evaluation.minutes_held || 0,
+      recorded_at: now,
+    });
+  }
 
   // ── Auto-blacklist on suspected rug (fast stop loss) ──────────
   const isLikelyRug =

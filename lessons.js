@@ -750,7 +750,7 @@ export function getLessonsForPrompt(opts = {}) {
   const selected = [...pinned, ...roleMatched, ...recent];
   const shared = getSharedLessonsForPrompt({
     agentType,
-    maxLessons: isAutoCycle ? 4 : 6,
+    maxLessons: isAutoCycle ? 8 : 12,
   });
   if (selected.length === 0 && !shared) return null;
 
