@@ -10,6 +10,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { log } from "./logger.js";
+import { normalizeCloseReason } from "./close-reason.js";
 import { getSharedLessonsForPrompt, pushHiveLesson, pushHivePerformanceEvent } from "./hivemind.js";
 import {
   initializeLessonScore,
@@ -104,12 +105,12 @@ export async function recordPerformance(perf) {
   const range_efficiency =
     perf.minutes_held > 0 ? (perf.minutes_in_range / perf.minutes_held) * 100 : 0;
 
-  const closeReasonText = String(perf.close_reason || "").toLowerCase();
+  const closeCategory = normalizeCloseReason(perf.close_reason);
   const suspiciousAbsurdClosedPnl =
     Number.isFinite(pnl_pct) &&
     perf.initial_value_usd >= 20 &&
     pnl_pct <= -90 &&
-    !closeReasonText.includes("stop loss");
+    closeCategory !== "stop_loss";
 
   if (suspiciousAbsurdClosedPnl) {
     log(
@@ -124,6 +125,7 @@ export async function recordPerformance(perf) {
     pnl_usd: Math.round(pnl_usd * 100) / 100,
     pnl_pct: Math.round(pnl_pct * 100) / 100,
     range_efficiency: Math.round(range_efficiency * 10) / 10,
+    close_reason_category: normalizeCloseReason(perf.close_reason),
     recorded_at: new Date().toISOString(),
   };
 
@@ -276,16 +278,16 @@ function derivLesson(perf) {
 
   if (!rule) return null;
 
-  const closeReasonText = String(perf.close_reason || "").toLowerCase();
+  const closeCategory = normalizeCloseReason(perf.close_reason);
   const positiveEvidence =
     feeYieldPct >= 1 || (perf.fees_earned_usd || 0) >= 3 || perf.pnl_pct >= 3;
   const negativeEvidence =
     perf.pnl_pct <= -5 ||
     perf.range_efficiency <= 30 ||
-    closeReasonText.includes("out of range") ||
-    closeReasonText.includes("oor") ||
-    closeReasonText.includes("low yield") ||
-    closeReasonText.includes("volume");
+    closeCategory === "oor" ||
+    closeCategory === "oor_below" ||
+    closeCategory === "oor_above" ||
+    closeCategory === "low_yield";
 
   let confidence = 0.35;
   if (outcome === "good") {

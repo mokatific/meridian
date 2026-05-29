@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { snapshotConfig } from "./config-snapshot.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
@@ -106,6 +107,10 @@ export const config = {
     maxTokenAgeHours: u.maxTokenAgeHours ?? null, // null = no maximum
     maxVolatility: u.maxVolatility ?? 15, // max volatility score (15 = very tolerant, evolveThresholds will tighten)
     athFilterPct: u.athFilterPct ?? null, // e.g. -20 = only deploy if price is >= 20% below ATH
+    minVolatility: u.minVolatility ?? null, // null = no minimum (filters dead/zombie pools)
+    maxSellPct: u.maxSellPct ?? null, // null = off; e.g. 60 = reject if >60% sells in 1h DexScreener window
+    deterministicScreening: u.deterministicScreening ?? false, // bypass LLM, use rank score
+    minDeployScore: u.minDeployScore ?? 55, // minimum rank score to deploy (0-100)
   },
 
   // ─── Position Management ────────────────
@@ -114,6 +119,8 @@ export const config = {
     autoSwapAfterClaim: u.autoSwapAfterClaim ?? false,
     outOfRangeBinsToClose: u.outOfRangeBinsToClose ?? 10,
     outOfRangeWaitMinutes: u.outOfRangeWaitMinutes ?? 30,
+    outOfRangeBelowWaitMinutes: u.outOfRangeBelowWaitMinutes ?? 30,
+    screeningRejectionCooldownMinutes: u.screeningRejectionCooldownMinutes ?? 30,
     oorCooldownTriggerCount: u.oorCooldownTriggerCount ?? 3,
     oorCooldownHours: u.oorCooldownHours ?? 12,
     lowYieldCooldownHours: u.lowYieldCooldownHours ?? 4,
@@ -239,7 +246,18 @@ export const config = {
     rsiOverBought: indicatorUserConfig.rsiOverBought ?? 80,
     requireAllIntervals: indicatorUserConfig.requireAllIntervals ?? false,
   },
+
+  // ─── Market Regime ────────────────────────
+  marketRegime: {
+    enabled: u.marketRegime?.enabled ?? false,
+    bearishThreshold: u.marketRegime?.bearishThreshold ?? -5, // SOL 24h change % to enter BEARISH
+    extremeBearishThreshold: u.marketRegime?.extremeBearishThreshold ?? -10, // SOL 24h change % to enter EXTREME_BEARISH
+    reducePositionSizePct: u.marketRegime?.reducePositionSizePct ?? 0.5, // multiply deploy amount by this in BEARISH
+    solPriceCacheTtlMs: u.marketRegime?.solPriceCacheTtlMs ?? 5 * 60 * 1000, // 5 min cache
+  },
 };
+
+config._hash = snapshotConfig(config);
 
 /**
  * Compute the optimal deploy amount for a given wallet balance.
@@ -320,6 +338,7 @@ export function reloadScreeningThresholds() {
       config.strategy.minBinsBelow,
       Math.min(config.strategy.maxBinsBelow, Math.round(defaultBinsBelow)),
     );
+    config._hash = snapshotConfig(config);
   } catch {
     /* ignore */
   }

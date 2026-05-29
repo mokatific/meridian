@@ -60,9 +60,12 @@ health.command("health", async (ctx) => {
     {
       name: "Meteora Pool Discovery",
       fn: async () => {
-        const r = await fetch("https://pool-discovery-api.datapi.meteora.ag/trending?limit=1", {
-          signal: AbortSignal.timeout(8000),
-        });
+        const r = await fetch(
+          "https://pool-discovery-api.datapi.meteora.ag/pools?page_size=1&category=trending&timeframe=5m",
+          {
+            signal: AbortSignal.timeout(8000),
+          },
+        );
         return `HTTP ${r.status}`;
       },
     },

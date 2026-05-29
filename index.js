@@ -7,7 +7,12 @@ import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances } from "./tools/wallet.js";
-import { getTopCandidates } from "./tools/screening.js";
+import {
+  getTopCandidates,
+  rankCandidates,
+  pickBestCandidate,
+  computeDeployArgs,
+} from "./tools/screening.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
 import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
@@ -41,7 +46,12 @@ import {
   resolvePendingTrailingDrop,
 } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
-import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
+import {
+  recordPositionSnapshot,
+  recallForPool,
+  addPoolNote,
+  recordScreeningRejection,
+} from "./pool-memory.js";
 import {
   checkSmartWalletsOnPool,
   listSmartWallets,
@@ -73,6 +83,15 @@ import {
 } from "./hivemind.js";
 import { initLogger, logManagementCycle, logScreeningCycle } from "./position-logger.js";
 import { appendDecision } from "./decision-log.js";
+import {
+  bold,
+  escapeHtml,
+  buildRangeBar as fmtRangeBar,
+  formatAge,
+  formatPct,
+  getExitLabel,
+  stripMarkdown,
+} from "./telegram-formatter.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
 const isMain = entrypointPath
@@ -546,34 +565,7 @@ export async function runManagementCycle({ silent = false } = {}) {
 
     // ── Position range bar helper ───────────────────────────────────
     function buildRangeBar(p) {
-      if (p.lower_bin == null || p.upper_bin == null || p.active_bin == null) return null;
-      const range = p.upper_bin - p.lower_bin;
-      if (range <= 0) return null;
-
-      const width = 10;
-      const ratio = (p.active_bin - p.lower_bin) / range;
-
-      // Build the visual bar
-      let bar;
-      if (p.in_range) {
-        const filled = Math.max(0, Math.min(width, Math.round(ratio * width)));
-        const empty = width - filled;
-        bar = `[${"▓".repeat(filled)}${"░".repeat(empty)}]`;
-      } else if (ratio < 0) {
-        bar = `◀[${"░".repeat(width)}]`;
-      } else {
-        bar = `[${"▓".repeat(width)}]▶`;
-      }
-
-      // Range percentage (requires bin_step)
-      if (p.bin_step != null) {
-        const stepMul = 1 + p.bin_step / 10000;
-        const pctToLower = (stepMul ** (p.lower_bin - p.active_bin) - 1) * 100;
-        const pctToUpper = (stepMul ** (p.upper_bin - p.active_bin) - 1) * 100;
-        bar += ` ${pctToLower >= 0 ? "+" : ""}${pctToLower.toFixed(1)}% / ${pctToUpper >= 0 ? "+" : ""}${pctToUpper.toFixed(1)}%`;
-      }
-
-      return bar;
+      return fmtRangeBar(p);
     }
 
     // ── Build JS report ──────────────────────────────────────────────
@@ -722,8 +714,8 @@ After executing, write a brief one-line result per position.
     _managementBusy = false;
     if (!silent && telegramEnabled()) {
       if (mgmtReport) {
-        if (liveMessage) await liveMessage.finalize(stripThink(mgmtReport)).catch(() => {});
-        else sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch(() => {});
+        if (liveMessage) await liveMessage.finalize(stripMarkdown(mgmtReport)).catch(() => {});
+        else sendMessage(`🔄 Management Cycle\n\n${stripMarkdown(mgmtReport)}`).catch(() => {});
       }
       for (const p of positions) {
         if (!p.in_range && p.minutes_out_of_range >= config.management.outOfRangeWaitMinutes) {
@@ -810,10 +802,37 @@ export async function runScreeningCycle({ silent = false } = {}) {
     deploySucceeded: false,
   };
   try {
+    // Market regime check — skip or reduce deploy size in bear markets
+    const marketRegime = await checkMarketRegime();
+    if (marketRegime.regime === "EXTREME_BEARISH") {
+      log(
+        "cron",
+        `Screening skipped — extreme bearish market (SOL 24h: ${marketRegime.change24h ?? "?"}%)`,
+      );
+      screenReport = `Screening skipped — extreme bearish market (SOL 24h: ${marketRegime.change24h ?? "?"}%). Pausing deployments.`;
+      appendDecision({
+        type: "skip",
+        actor: "SCREENER",
+        summary: "Screening skipped",
+        reason: `Extreme bearish market (SOL 24h: ${marketRegime.change24h ?? "?"}%)`,
+      });
+      _screeningBusy = false;
+      return screenReport;
+    }
+
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
-    const deployAmount = computeDeployAmount(currentBalance.sol);
+    let deployAmount = computeDeployAmount(currentBalance.sol);
     _screenLog.deployAmount = deployAmount;
+    // Reduce deploy size during bearish market
+    if (marketRegime.regime === "BEARISH") {
+      const reducePct = config.marketRegime.reducePositionSizePct ?? 0.5;
+      deployAmount = parseFloat((deployAmount * reducePct).toFixed(2));
+      log(
+        "cron",
+        `Bearish regime — reduced deploy amount by ${reducePct * 100}% → ${deployAmount} SOL`,
+      );
+    }
     log("cron", `Computed deploy amount: ${deployAmount} SOL (wallet: ${currentBalance.sol} SOL)`);
 
     // Load active strategy
@@ -981,6 +1000,103 @@ export async function runScreeningCycle({ silent = false } = {}) {
       activeBinResults.push(result);
       await new Promise((r) => setTimeout(r, 200));
     }
+
+    // ── Deterministic screening path (no LLM) ──────────────────────────────
+    if (config.screening.deterministicScreening) {
+      const enrichedCandidates = passing.map(({ pool, sw, n, ti, mem, ds, gmgn }, i) => ({
+        pool,
+        sw,
+        n,
+        ti,
+        mem,
+        ds: ds || {},
+        gmgn: gmgn || {},
+        active_bin:
+          activeBinResults[i]?.status === "fulfilled" ? activeBinResults[i].value?.binId : null,
+      }));
+
+      const ranked = rankCandidates(enrichedCandidates);
+      const best = pickBestCandidate(ranked, config.screening.minDeployScore ?? 55);
+
+      if (!best) {
+        log(
+          "screening",
+          `Deterministic: no candidate above minDeployScore (${config.screening.minDeployScore}). Top score: ${ranked[0]?.rank_score ?? 0}`,
+        );
+        screenReport = `No candidates above quality threshold. Top score: ${ranked[0]?.rank_score ?? 0}/${config.screening.minDeployScore}.`;
+        appendDecision({
+          type: "no_deploy",
+          actor: "SCREENER",
+          summary: "Deterministic: below threshold",
+          reason: screenReport,
+          rejected: ranked.slice(0, 5).map((r) => `${r.pool?.name} (score=${r.rank_score})`),
+        });
+        const cooldownMinutes = config.management.screeningRejectionCooldownMinutes ?? 30;
+        for (const { pool } of passing) {
+          if (pool?.pool)
+            recordScreeningRejection(
+              pool.pool,
+              pool.base?.mint || null,
+              "Below deploy threshold",
+              cooldownMinutes,
+            );
+        }
+        _screeningBusy = false;
+        return screenReport;
+      }
+
+      const activeBin = best.candidate.active_bin;
+      if (activeBin == null) {
+        log(
+          "screening",
+          `Deterministic: no active_bin for ${best.candidate.pool?.name} — skipping`,
+        );
+        screenReport = `Skip: no active_bin for ${best.candidate.pool?.name}.`;
+        _screeningBusy = false;
+        return screenReport;
+      }
+
+      const deployArgs = computeDeployArgs(best.candidate, deployAmount, activeBin, config);
+      log("screening", `Deterministic deploy: ${best.candidate.pool?.name} score=${best.score}`);
+      await liveMessage?.note(
+        `🚀 Deploying ${best.candidate.pool?.name} (score: ${best.score})...`,
+      );
+
+      const result = await executeTool("deploy_position", deployArgs);
+      const deployOk = result && result.success !== false && !result.error && !result.blocked;
+      const skipReason = result?.error || result?.message || result?.reason || "unknown";
+
+      const decision = {
+        action: deployOk ? "deploy" : "skip",
+        pair: best.candidate.pool?.name,
+        summary: deployOk
+          ? `Deterministic deploy: score=${best.score}, fee_tvl=${best.breakdown?.fee_tvl}, smart_wallets=${best.breakdown?.smart_wallets}`
+          : `Deploy blocked: ${skipReason}`,
+        reason: deployOk ? undefined : `Deploy blocked: ${skipReason}`,
+        confidence:
+          best.score >= 80
+            ? "very_high"
+            : best.score >= 65
+              ? "high"
+              : best.score >= 55
+                ? "medium"
+                : "low",
+        rank_score: best.score,
+        rank_breakdown: best.breakdown,
+      };
+
+      screenReport = `${deployOk ? "✅ Deployed" : "⛔ No deploy"}: ${decision.pair} (score=${best.score})\n${decision.summary}`;
+      appendDecision({
+        type: deployOk ? "deploy" : "no_deploy",
+        actor: "SCREENER",
+        summary: `Deterministic: ${decision.pair} (score=${best.score})`,
+        reason: decision.summary,
+      });
+
+      _screeningBusy = false;
+      return screenReport;
+    }
+    // ── End deterministic path ─────────────────────────────────────────────
 
     // Build compact candidate blocks
     const candidateBlocks = passing.map(({ pool, sw, n, ti, mem }, i) => {
@@ -1200,6 +1316,23 @@ IMPORTANT:
     const content = agentResult?.content || agentResult || "";
     screenReport = content;
     if (/⛔\s*NO DEPLOY/i.test(content)) {
+      // Set rejection cooldown on all presented candidates
+      const cooldownMinutes = config.management.screeningRejectionCooldownMinutes ?? 30;
+      if (cooldownMinutes > 0 && Array.isArray(passing)) {
+        for (const { pool } of passing) {
+          if (pool?.pool)
+            recordScreeningRejection(
+              pool.pool,
+              pool.base?.mint || null,
+              "LLM chose not to deploy",
+              cooldownMinutes,
+            );
+        }
+        log(
+          "screening",
+          `Rejection cooldown (${cooldownMinutes}m) set on ${passing.length} candidate(s)`,
+        );
+      }
       appendDecision({
         type: "no_deploy",
         actor: "SCREENER",
@@ -1310,8 +1443,8 @@ IMPORTANT:
 
     if (!silent && telegramEnabled()) {
       if (screenReport) {
-        if (liveMessage) await liveMessage.finalize(stripThink(screenReport)).catch(() => {});
-        else sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch(() => {});
+        if (liveMessage) await liveMessage.finalize(stripMarkdown(screenReport)).catch(() => {});
+        else sendMessage(`🔍 Screening Cycle\n\n${stripMarkdown(screenReport)}`).catch(() => {});
       }
     }
   }
@@ -1664,6 +1797,59 @@ function formatCandidates(candidates) {
   ].join("\n");
 }
 
+// ═══════════════════════════════════════════
+//  MARKET REGIME AWARENESS
+// ═══════════════════════════════════════════
+let _solPriceCache = null;
+let _solPriceCacheTime = 0;
+
+export async function checkMarketRegime() {
+  const cfg = config.marketRegime;
+  if (!cfg?.enabled) {
+    return { change24h: null, regime: "NORMAL", reason: "disabled" };
+  }
+
+  const now = Date.now();
+  if (_solPriceCache && now - _solPriceCacheTime < cfg.solPriceCacheTtlMs) {
+    return _solPriceCache;
+  }
+
+  try {
+    const resp = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&include_24hr_change=true",
+      { signal: AbortSignal.timeout(8000) },
+    );
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const change24h = data?.solana?.usd_24h_change ?? null;
+
+    if (change24h == null) {
+      const result = { change24h: null, regime: "NORMAL", reason: "no_change_data" };
+      _solPriceCache = result;
+      _solPriceCacheTime = now;
+      return result;
+    }
+
+    let regime = "NORMAL";
+    if (change24h <= cfg.extremeBearishThreshold) {
+      regime = "EXTREME_BEARISH";
+    } else if (change24h <= cfg.bearishThreshold) {
+      regime = "BEARISH";
+    }
+
+    const result = { change24h: parseFloat(change24h.toFixed(2)), regime };
+    _solPriceCache = result;
+    _solPriceCacheTime = now;
+    return result;
+  } catch (e) {
+    log("cron_warn", `Market regime check failed (defaulting to NORMAL): ${e.message}`);
+    const result = { change24h: null, regime: "NORMAL", reason: `api_error: ${e.message}` };
+    _solPriceCache = result;
+    _solPriceCacheTime = now;
+    return result;
+  }
+}
+
 function getDeterministicCloseRule(position, managementConfig) {
   const tracked = getTrackedPosition(position.position);
   const pnlSuspect = (() => {
@@ -1710,6 +1896,15 @@ function getDeterministicCloseRule(position, managementConfig) {
     (position.age_minutes ?? 0) >= (managementConfig.minAgeBeforeYieldCheck ?? 60)
   ) {
     return { action: "CLOSE", rule: 5, reason: "low yield" };
+  }
+  // Rule 6: OOR below — price dropped below lower_bin
+  if (
+    position.active_bin != null &&
+    position.lower_bin != null &&
+    position.active_bin < position.lower_bin &&
+    (position.minutes_out_of_range ?? 0) >= (managementConfig.outOfRangeBelowWaitMinutes ?? 30)
+  ) {
+    return { action: "CLOSE", rule: 6, reason: "OOR below" };
   }
   return null;
 }
@@ -2746,9 +2941,12 @@ async function telegramHandler(msg) {
       {
         name: "Meteora Pool Discovery",
         fn: async () => {
-          const r = await fetch("https://pool-discovery-api.datapi.meteora.ag/trending?limit=1", {
-            signal: AbortSignal.timeout(8000),
-          });
+          const r = await fetch(
+            "https://pool-discovery-api.datapi.meteora.ag/pools?page_size=1&category=trending&timeframe=5m",
+            {
+              signal: AbortSignal.timeout(8000),
+            },
+          );
           return `HTTP ${r.status}`;
         },
       },
@@ -2844,8 +3042,8 @@ async function telegramHandler(msg) {
       },
     );
     appendHistory(displayText, content);
-    if (liveMessage) await liveMessage.finalize(stripThink(content));
-    else await sendMessage(stripThink(content));
+    if (liveMessage) await liveMessage.finalize(stripMarkdown(stripThink(content)));
+    else await sendMessage(stripMarkdown(stripThink(content)));
   } catch (e) {
     if (liveMessage) await liveMessage.fail(e.message).catch(() => {});
     else await sendMessage(`Error: ${e.message}`).catch(() => {});

@@ -208,6 +208,137 @@ function evaluatePreset(side, preset, payload) {
             reason: "Price rejected below a key Fibonacci level",
             signal: summary,
           };
+
+    // ── New presets for new Solana pairs ─────────────────────────────────
+    //
+    // Rationale: classic indicators don't work well on brand-new Solana pairs
+    // (too little history, high volatility, no meaningful ATH reference).
+    // These presets are pragmatic — they avoid the worst entry points
+    // (pumped ATH candles, RSI >70 momentum chases) rather than trying to
+    // time perfect entries. "Not wrong" > "perfectly right" for new pairs.
+
+    case "momentum_dip":
+      // Entry: Supertrend bullish AND RSI has cooled off from overbought.
+      // Accepts: RSI < 60 (not chasing a hot candle) — catches both genuine dips
+      // (RSI oversold) and mild pullbacks (RSI 35–55). Only blocks entries when RSI
+      // is clearly overbought (>60), which is when price is most likely at local top.
+      // For new Solana pairs: avoids buying the first explosive 5m candle (RSI 80+),
+      // waits for any cooling off, then enters while trend is intact.
+      // Exit: supertrend flips bearish.
+      return side === "entry"
+        ? {
+            confirmed: isBullish && rsi != null && rsi < 60, // block only when clearly overbought
+            reason:
+              rsi != null && rsi >= 60
+                ? `BLOCKED: RSI ${rsi?.toFixed(1)} overbought — wait for cooldown`
+                : `Supertrend bullish, RSI ${rsi?.toFixed(1)} — not chasing top`,
+            signal: summary,
+          }
+        : {
+            confirmed:
+              summary.supertrendBreakDown ||
+              (isBearish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close <= summary.supertrendValue),
+            reason: summary.supertrendBreakDown
+              ? "Supertrend flipped bearish"
+              : "Price below bearish Supertrend",
+            signal: summary,
+          };
+
+    case "not_near_ath":
+      // Entry: price is NOT above the upper Bollinger band (not at local ATH/extended top)
+      // AND supertrend is bullish OR price is in oversold zone.
+      // This is a NEGATIVE gate — it only blocks entries when price is clearly overextended.
+      // Price below BB upper = fine. Price above BB upper = extended, skip.
+      // Most useful when combined with other filters: "deploy if not at ATH AND trend ok".
+      // Exit: price reaches upper band (take profit zone) or supertrend flips.
+      return side === "entry"
+        ? {
+            confirmed:
+              (isBullish || (rsi != null && rsi <= (oversold ?? 35))) &&
+              (close == null || upperBand == null || close < upperBand), // not above upper BB
+            reason:
+              close != null && upperBand != null && close >= upperBand
+                ? `BLOCKED: Price ${close?.toFixed(6)} at/above BB upper ${upperBand?.toFixed(6)} — extended, skip`
+                : `Price below BB upper — not at local top, trend context ok`,
+            signal: summary,
+          }
+        : {
+            confirmed:
+              (close != null && upperBand != null && close >= upperBand) ||
+              summary.supertrendBreakDown ||
+              (isBearish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close <= summary.supertrendValue),
+            reason: "Price at BB upper (local ATH) or Supertrend flipped bearish",
+            signal: summary,
+          };
+
+    case "fibo_pullback":
+      // Entry: price has pulled back into the 0.382–0.618 Fibonacci retracement zone
+      // AND supertrend is still bullish. Classic "buy the dip" on a trending pair.
+      // The 0.382–0.618 zone is the "golden pocket" — strong hands accumulate here.
+      // For new pairs, fib levels are computed from the candle window high/low,
+      // so they update continuously — this is fine, we just want "middle of range".
+      // Exit: price reclaims fib 0.236 (near high) or supertrend flips.
+      return side === "entry"
+        ? {
+            confirmed: (() => {
+              if (!isBullish || close == null) return false;
+              const fib382 =
+                summary.fib50 != null && summary.fib618 != null
+                  ? summary.fib618 + (summary.fib50 - summary.fib618) * 0.5 // approximate 0.382
+                  : null;
+              const fib618 = summary.fib618;
+              // Price in golden pocket: between fib 0.382 and 0.618
+              if (fib382 != null && fib618 != null) {
+                return close >= fib618 && close <= fib382;
+              }
+              // Fallback: price near or below fib50 (middle of range)
+              return summary.fib50 != null && close <= summary.fib50 * 1.005;
+            })(),
+            reason: `Price in Fibonacci golden pocket (0.382–0.618 zone) with bullish Supertrend`,
+            signal: summary,
+          }
+        : {
+            confirmed:
+              summary.supertrendBreakDown ||
+              (isBearish &&
+                close != null &&
+                summary.supertrendValue != null &&
+                close <= summary.supertrendValue) ||
+              (close != null &&
+                summary.fib50 != null &&
+                close >= summary.fib50 * 0.998 &&
+                crossedUp(summary.fib50)),
+            reason: "Supertrend flipped bearish or price reclaimed fib 0.5 mid-level",
+            signal: summary,
+          };
+
+    case "supertrend_or_dip":
+      // Permissive combo: confirms if EITHER supertrend just broke up OR RSI dipped
+      // below oversold. Useful when you want to catch both breakout and dip entries.
+      // Good for volatile new pairs where momentum can reverse fast.
+      return side === "entry"
+        ? {
+            confirmed:
+              summary.supertrendBreakUp || (isBullish && rsi != null && rsi <= (oversold ?? 35)),
+            reason: summary.supertrendBreakUp
+              ? "Supertrend just flipped bullish (breakout entry)"
+              : `RSI oversold (${rsi ?? "n/a"}) with bullish Supertrend (dip entry)`,
+            signal: summary,
+          }
+        : {
+            confirmed: summary.supertrendBreakDown || (rsi != null && rsi >= overbought),
+            reason: summary.supertrendBreakDown
+              ? "Supertrend flipped bearish"
+              : `RSI overbought (${rsi ?? "n/a"})`,
+            signal: summary,
+          };
+
     default:
       return {
         confirmed: false,

@@ -41,6 +41,7 @@ import {
 } from "../smart-wallets.js";
 import { discoverWalletsFromKolTweets } from "../twitter-wallet.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
+import { checkGmgnSignals, checkGmgnExitSignal, screenCycleTokens } from "./gmgn.js";
 import {
   openPaperPositionTool,
   getPaperPositionTool,
@@ -282,6 +283,9 @@ const toolMap = {
   get_token_info: getTokenInfo,
   get_token_holders: getTokenHolders,
   get_token_narrative: getTokenNarrative,
+  check_gmgn_signals: checkGmgnSignals,
+  check_gmgn_exit_signal: checkGmgnExitSignal,
+  screen_cycle_tokens: async ({ top, min_usd } = {}) => screenCycleTokens({ top, minUsd: min_usd }),
   add_smart_wallet: addSmartWallet,
   remove_smart_wallet: removeSmartWallet,
   list_smart_wallets: listSmartWallets,

@@ -109,3 +109,4 @@ venv/
 .venv/
 *.egg-info/
 .ruff_cache
+config-snapshots.json

@@ -15,6 +15,7 @@ const MANAGER_TOOLS = new Set([
   "get_paper_position",
   "close_paper_position",
   "list_paper_positions",
+  "check_gmgn_exit_signal",
 ]);
 const SCREENER_TOOLS = new Set([
   "deploy_position",
@@ -32,6 +33,8 @@ const SCREENER_TOOLS = new Set([
   "get_paper_position",
   "close_paper_position",
   "list_paper_positions",
+  "check_gmgn_signals",
+  "screen_cycle_tokens",
 ]);
 const GENERAL_INTENT_ONLY_TOOLS = new Set([
   "self_update",
