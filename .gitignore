@@ -99,3 +99,10 @@ docs/
 .claude/scheduled_tasks.lock
 memory/
 .playwright-mcp/
+
+# ============================================
+# Dashboard (Next.js)
+# ============================================
+dashboard/.next/
+dashboard/node_modules/
+dashboard/.env.local
