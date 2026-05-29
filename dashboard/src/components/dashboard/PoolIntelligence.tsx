@@ -42,9 +42,12 @@ function RiskBadge({ token }: { token?: MeteoraPool['token_x'] }) {
   if (!token) return null
   const warnings = token.warnings ?? []
   if (!warnings.length && !token.has_freeze_authority && !token.has_mint_authority) return null
+  const label = warnings.length
+    ? (warnings[0].type.replace(/_/g, ' ').toLowerCase())
+    : (token.has_freeze_authority ? 'freeze auth' : 'mint auth')
   return (
-    <span className="rounded border border-red-800/50 bg-red-950/30 px-1.5 py-px text-xs text-red-400">
-      {warnings[0] ?? (token.has_freeze_authority ? 'freeze' : 'mint-auth')}
+    <span className="rounded border border-red-800/50 bg-red-950/30 px-1.5 py-px text-xs text-red-400" title={warnings[0]?.message}>
+      ⚠ {label}
     </span>
   )
 }

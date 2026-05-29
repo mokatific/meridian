@@ -158,7 +158,7 @@ export interface MeteoraTokenInfo {
   organic_score?: number
   organic_score_label?: string
   top_holders_pct?: number
-  warnings?: string[]
+  warnings?: { type: string; message: string; severity: string }[]
   tags?: string[]
 }
 
