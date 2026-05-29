@@ -1363,8 +1363,8 @@ async function fetchRawOpenPositionsFromMeridian({ walletAddress, agentId }) {
   const payload = await agentMeridianJson(`/positions/open/raw?${search.toString()}`, {
     headers: getAgentMeridianHeaders(),
     retry: {
-      maxElapsedMs: 12_000,
-      perAttemptTimeoutMs: 6_000,
+      maxElapsedMs: 30_000,
+      perAttemptTimeoutMs: 10_000,
     },
   });
   const rows = Array.isArray(payload?.data) ? payload.data : [];
