@@ -107,7 +107,7 @@ elif [ -n "$SERVER_PASSWORD" ]; then
   if ! command -v sshpass &> /dev/null; then
     echo -e "${RED}Error:${NC} SERVER_PASSWORD is set but ${BOLD}sshpass${NC} is not installed."
     echo -e "  macOS:  ${DIM}brew install sshpass${NC}"
-    echo -e "  Ubuntu: ${DIM}apt install sshpass${NC}"
+    echo -e "  Ubuntu: ${DIM}sudo apt install sshpass${NC}"
     echo "  Or use SSH_KEY instead."
     exit 1
   fi
