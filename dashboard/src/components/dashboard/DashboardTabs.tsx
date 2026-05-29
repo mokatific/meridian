@@ -26,7 +26,7 @@ export function DashboardTabs() {
 
   return (
     <Tabs defaultValue="network" className="space-y-4">
-      <TabsList className="bg-zinc-900 border border-zinc-800 h-9 flex-wrap gap-px">
+      <TabsList className="bg-zinc-900 border border-zinc-800 h-auto flex-wrap gap-px p-1">
         <TabsTrigger value="network" className="text-xs data-[state=active]:bg-zinc-700">
           🌐 Network
           {activeCount && <span className="ml-1.5 rounded-full bg-zinc-700 px-1.5 py-px text-xs text-zinc-300">{activeCount}</span>}

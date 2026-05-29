@@ -142,7 +142,8 @@ function TopPoolsTable({ pools }: { pools: PublicSummary['topPools'] }) {
       <div className="px-3 py-2 bg-zinc-900/60 border-b border-zinc-800 text-xs font-medium text-zinc-400">
         🏆 Top Pools by Network PnL
       </div>
-      <table className="w-full text-xs">
+      <div className="overflow-x-auto">
+      <table className="min-w-full text-xs">
         <thead>
           <tr className="border-b border-zinc-800 text-zinc-600">
             <th className="py-1.5 px-3 text-left">Pool</th>
@@ -172,6 +173,7 @@ function TopPoolsTable({ pools }: { pools: PublicSummary['topPools'] }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

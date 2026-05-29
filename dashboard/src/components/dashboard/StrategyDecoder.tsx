@@ -143,7 +143,7 @@ function WalletCard({ owner, rank }: { owner: HistoricalOwner; rank: number }) {
         )}
 
         {expanded && owner.topPositions?.length > 0 && (
-          <div className="mt-2 overflow-x-auto rounded border border-zinc-800">
+          <div className="mt-2 overflow-x-auto rounded border border-zinc-800 max-w-full">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-zinc-800 bg-zinc-900/80 text-zinc-600">

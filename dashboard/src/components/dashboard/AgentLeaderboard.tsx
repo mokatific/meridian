@@ -206,8 +206,8 @@ export function AgentLeaderboard() {
         <span className="text-xs text-zinc-600">{agents.length} of {data.graph.agents.length} agents</span>
       </div>
 
-      <div className="rounded-lg border border-zinc-800 overflow-hidden max-h-[70vh] overflow-y-auto">
-        <table className="w-full text-xs">
+      <div className="rounded-lg border border-zinc-800 overflow-hidden max-h-[70vh] overflow-y-auto overflow-x-auto">
+        <table className="min-w-full text-xs">
           <thead className="sticky top-0 bg-zinc-900 border-b border-zinc-800">
             <tr className="text-zinc-600">
               <th className="py-2 px-3 text-left w-8">#</th>

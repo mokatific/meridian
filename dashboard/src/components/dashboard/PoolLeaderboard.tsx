@@ -110,7 +110,7 @@ export function PoolLeaderboard() {
 
       {!loading && lpers.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-zinc-800">
-          <table className="w-full text-xs">
+          <table className="min-w-full text-xs whitespace-nowrap">
             <thead>
               <tr className="border-b border-zinc-800 bg-zinc-900/80 text-zinc-500">
                 <th className="py-2 pl-3 pr-2 text-left w-8">#</th>

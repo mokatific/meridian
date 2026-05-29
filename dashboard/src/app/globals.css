@@ -128,3 +128,38 @@
     @apply font-sans;
   }
 }
+
+/* ─── Thin dark scrollbars everywhere ─────────────────────────── */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ─── Prevent layout blowout from long unbreakable strings ─────── */
+/* Only apply break-all outside of tables (tables use overflow-x-auto instead) */
+p .font-mono, div > .font-mono, span.font-mono {
+  word-break: break-all;
+}
+
+/* ─── Table scroll wrapper ──────────────────────────────────────── */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll table {
+  min-width: 100%;
+  white-space: nowrap;
+}
