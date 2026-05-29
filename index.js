@@ -871,13 +871,13 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
     // Fetch top candidates with 60s timeout to prevent hanging screening
     log("cron", "[DEBUG] Fetching top candidates...");
-    const topCandidates = await withTimeout(getTopCandidates({ limit: 10 }), 60_000);
+    const topCandidates = await withTimeout(getTopCandidates({ limit: 10 }), 120_000);
     log(
       "cron",
       `[DEBUG] getTopCandidates done: ${topCandidates?.candidates?.length ?? 0} candidates, ${topCandidates?.filtered_examples?.length ?? 0} filtered`,
     );
     if (!topCandidates) {
-      screenReport = "Screening cancelled — getTopCandidates timed out (60s).";
+      screenReport = "Screening cancelled — getTopCandidates timed out (120s).";
       log("cron", screenReport);
       appendDecision({
         type: "skip",

@@ -457,7 +457,7 @@ export async function confirmIndicatorPreset({
           .filter((entry) => entry.confirmed)
           .map((entry) => entry.interval)
           .join(", ")}`
-      : `${preset} not confirmed on ${successful.map((entry) => entry.interval).join(", ")}`,
+      : `${preset} not confirmed on ${successful.map((entry) => `${entry.interval}[${entry.reason}]`).join(", ")}`,
     intervals: results,
   };
 }

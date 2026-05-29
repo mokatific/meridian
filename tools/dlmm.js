@@ -1363,8 +1363,8 @@ async function fetchRawOpenPositionsFromMeridian({ walletAddress, agentId }) {
   const payload = await agentMeridianJson(`/positions/open/raw?${search.toString()}`, {
     headers: getAgentMeridianHeaders(),
     retry: {
-      maxElapsedMs: 30_000,
-      perAttemptTimeoutMs: 10_000,
+      maxElapsedMs: 12_000,
+      perAttemptTimeoutMs: 6_000,
     },
   });
   const rows = Array.isArray(payload?.data) ? payload.data : [];
@@ -1434,8 +1434,8 @@ export async function getMyPositions({
         } catch (error) {
           _relayFailure();
           log(
-            "positions_warn",
-            `Agent Meridian raw relay failed; falling back to direct LPAgent fetch: ${error.message}`,
+            "positions_debug",
+            `Agent Meridian relay unavailable (${error.message}) — using direct LPAgent fetch`,
           );
         }
       }
