@@ -67,7 +67,6 @@ import {
   evaluateVirtualPositions,
   getVirtualSummary,
   getVirtualWalletSummary,
-  resetVirtualTrading,
 } from "./dry-run-simulator.js";
 import { getCausalAnalysisSummary } from "./causal-analysis.js";
 import { tickPaperPositions } from "./paper-positions.js";
@@ -2414,7 +2413,6 @@ function formatHelpText() {
     "/deploy <n> — deploy candidate by cached index",
     "/smart_wallets — list tracked smart wallets",
     "/sim — virtual trading summary (dry run stats)",
-    "/simreset — reset virtual trading to initial balance (dry run only)",
     "/analysis — causal analysis: why positions win or lose",
     "/briefing — morning briefing",
     "/hive — HiveMind sync status",
@@ -2600,17 +2598,6 @@ async function telegramHandler(msg) {
     return;
   }
   // Lightweight commands that must bypass the busy queue and never reach the LLM
-  if (text === "/simreset") {
-    if (process.env.DRY_RUN !== "true") {
-      await sendMessage("⚠️ /simreset only works in dry-run mode (DRY_RUN=true).").catch(() => {});
-      return;
-    }
-    const result = resetVirtualTrading();
-    await sendMessage(
-      `🔄 <b>Virtual trading reset</b>\n\nBalance restored to ${result.initialBalance} SOL\nAll virtual positions and history cleared.\n\nReady for a fresh test run.`,
-    ).catch(() => {});
-    return;
-  }
   if (_managementBusy || _screeningBusy || busy) {
     if (_telegramQueue.length < 5) {
       _telegramQueue.push(msg);

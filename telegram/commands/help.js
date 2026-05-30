@@ -27,6 +27,7 @@ const HELP_TEXT = `🎛 Meridian Commands
 /briefing — Daily performance briefing
 /analysis — Causal analysis: why positions win or lose
 /sim — Virtual trading summary (dry run stats)
+/simreset — Reset virtual trading to initial balance (dry run only)
 
 🧠 Smart Wallets & HiveMind
 /smart_wallets — List tracked KOL / smart wallets
