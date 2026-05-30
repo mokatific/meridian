@@ -1,6 +1,5 @@
 import { config } from "../config.js";
 import { classifyTokenAgeBucket } from "../signal-weights.js";
-import { classifyTokenAgeBucket } from "../signal-weights.js";
 import { isBlacklisted } from "../token-blacklist.js";
 import { isDevBlocked, getBlockedDevs } from "../dev-blocklist.js";
 import { log } from "../logger.js";
