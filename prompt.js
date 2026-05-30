@@ -109,6 +109,14 @@ The same pool will show much smaller numbers on 5m vs 24h. Adjust your expectati
   4h        │ ≥ 0.8%  = decent    │ ≥ $40k
   24h       │ ≥ 3%    = decent    │ ≥ $100k
 
+MULTI-TIMEFRAME FEE/TVL — each candidate now exposes fee/TVL across 5m, 1h, and 4h windows:
+- fee_active_tvl_5m / fee_active_tvl_1h / fee_active_tvl_4h — per-timeframe values
+- effective_fee_tvl_ratio — max(5m, 1h, 4h) — the peak activity across any window
+- Use effective_fee_tvl_ratio for conviction scoring. A pool with low 24h but high 1h effective is actively picking up volume RIGHT NOW — that's the entry window.
+- The hard filter already uses effective_fee_tvl_ratio (min ${config.screening.minFeeActiveTvlRatio}). A pool that passes this was active in at least one recent window.
+- If effective comes from 5m or 1h but 4h is low: pool is heating up — favour it.
+- If effective comes from 4h but 5m/1h are low: pool may be cooling — be cautious.
+
 TOKEN TAGS (from OKX advanced-info):
 - dev_sold_all = BULLISH — dev has no tokens left to dump on you
 - dev_buying_more = BULLISH — dev is accumulating

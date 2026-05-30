@@ -91,6 +91,9 @@ export const config = {
     maxVolatility: u.maxVolatility ?? null, // max pool volatility to screen (null = no cap)
     useDiscordSignals: u.useDiscordSignals ?? false,
     discordSignalMode: u.discordSignalMode ?? "merge", // merge | only
+    useGmgnScreening: u.useGmgnScreening ?? false, // use GMGN trending+signal as screening source
+    gmgnScreeningMode: u.gmgnScreeningMode ?? "merge", // merge | only
+    gmgnTrendingInterval: u.gmgnTrendingInterval ?? "1h", // 1m | 5m | 1h | 6h | 24h
     avoidPvpSymbols: u.avoidPvpSymbols ?? true, // avoid exact-symbol rivals with real active pools
     blockPvpSymbols: u.blockPvpSymbols ?? false, // hard-filter PVP rivals before the LLM sees them
     maxBundlePct: u.maxBundlePct ?? 30, // max bundle holding % (OKX advanced-info)
@@ -303,6 +306,9 @@ export function reloadScreeningThresholds() {
     if (fresh.maxTop10Pct != null) s.maxTop10Pct = fresh.maxTop10Pct;
     if (fresh.useDiscordSignals !== undefined) s.useDiscordSignals = fresh.useDiscordSignals;
     if (fresh.discordSignalMode != null) s.discordSignalMode = fresh.discordSignalMode;
+    if (fresh.useGmgnScreening !== undefined) s.useGmgnScreening = fresh.useGmgnScreening;
+    if (fresh.gmgnScreeningMode != null) s.gmgnScreeningMode = fresh.gmgnScreeningMode;
+    if (fresh.gmgnTrendingInterval != null) s.gmgnTrendingInterval = fresh.gmgnTrendingInterval;
     if (fresh.excludeHighSupplyConcentration !== undefined)
       s.excludeHighSupplyConcentration = fresh.excludeHighSupplyConcentration;
     if (fresh.minOrganic != null) s.minOrganic = fresh.minOrganic;

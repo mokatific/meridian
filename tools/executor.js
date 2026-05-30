@@ -681,15 +681,15 @@ export async function executeTool(name, args) {
           : result.pool_name || args.pool_name || args.pool_address?.slice(0, 8);
         notifyDeploy({
           pair: poolName,
+          pool: args.pool_address,
           amountSol: args.amount_y ?? args.amount_sol ?? 0,
-          position: isDryRun ? "DRY RUN" : result.position,
-          tx: isDryRun ? "DRY RUN" : (result.txs?.[0] ?? result.tx),
+          position: isDryRun ? null : result.position,
+          tx: isDryRun ? null : (result.txs?.[0] ?? result.tx),
           priceRange: result.price_range,
           rangeCoverage: result.range_coverage,
           binStep: result.bin_step,
           baseFee: result.base_fee,
           dryRun: isDryRun,
-          // forward narrative if provided by the caller or result
           narrative: args.narrative ?? result.narrative ?? null,
         }).catch(() => {});
         initLogger();
@@ -710,9 +710,13 @@ export async function executeTool(name, args) {
       } else if (name === "close_position") {
         notifyClose({
           pair: result.pool_name || args.position_address?.slice(0, 8),
+          pool: result.pool,
+          position: args.position_address,
           pnlUsd: result.pnl_usd ?? 0,
           pnlPct: result.pnl_pct ?? 0,
           reason: args.reason,
+          feesUsd: result.fees_usd,
+          txs: result.close_txs ?? result.txs,
         }).catch(() => {});
         // Note low-yield closes in pool memory so screener avoids redeploying
         if (args.reason && args.reason.toLowerCase().includes("yield")) {

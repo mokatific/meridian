@@ -349,6 +349,123 @@ export function detectClusterSignals(trades, windowMinutes = DEFAULT_WINDOW_MINU
   return signals;
 }
 
+// ── Gas Price Cache ───────────────────────────────────────────
+
+const GAS_CACHE_TTL = 30_000; // 30s
+let _gasPriceCache = { value: null, fetchedAt: 0 };
+
+/**
+ * Fetch recommended SOL priority fee from GMGN.
+ * Returns microLamports for ComputeBudgetProgram.setComputeUnitPrice.
+ * Uses `auto` tier (~median network fee). Cached 30s. Fail-open: returns null.
+ */
+export async function fetchGmgnGasPrice() {
+  if (_gasPriceCache.value && Date.now() - _gasPriceCache.fetchedAt < GAS_CACHE_TTL) {
+    return _gasPriceCache.value;
+  }
+  try {
+    const { stdout } = await _execFn("gmgn-cli gas-price --chain sol --raw", {
+      timeout: 10_000,
+      encoding: "utf8",
+    });
+    const data = JSON.parse(stdout);
+    // `auto` is in SOL — convert to microLamports (1 SOL = 1e9 lamports = 1e15 microLamports)
+    const autoSol = parseFloat(data?.auto);
+    if (!Number.isFinite(autoSol) || autoSol <= 0) return null;
+    // `auto` is in SOL — treat as lamports/CU and convert to microLamports/CU
+    // (1 lamport = 1e6 microLamports). Gives ~2,000 microLamports/CU for typical auto=0.002.
+    const microLamports = Math.round(autoSol * 1e6);
+    // Clamp: floor 1000, ceiling 5_000_000 microLamports/CU
+    const clamped = Math.max(1_000, Math.min(5_000_000, microLamports));
+    _gasPriceCache = { value: clamped, fetchedAt: Date.now() };
+    return clamped;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch trending tokens from GMGN.
+ * Returns array of token objects normalized for screening.
+ * Fail-open: returns empty array on any error.
+ */
+export async function fetchGmgnTrending({ interval = "1h", limit = 100, filters = [] } = {}) {
+  try {
+    const filterArgs = filters.map((f) => `--filter ${f}`).join(" ");
+    const raw = await runGmgnCli(
+      `market trending --chain sol --interval ${interval} --limit ${limit} ${filterArgs}`,
+    );
+    const rank = raw?.data?.rank;
+    if (!Array.isArray(rank) || rank.length === 0) return [];
+    return rank.map((t) => ({
+      mint: t.address,
+      symbol: t.symbol,
+      name: t.name,
+      market_cap: t.market_cap,
+      volume: t.volume,
+      holder_count: t.holder_count,
+      liquidity: t.liquidity,
+      price_change_1h: t.price_change_percent1h,
+      price_change_5m: t.price_change_percent5m,
+      bundler_rate: t.bundler_rate,
+      is_wash_trading: t.is_wash_trading,
+      renounced_mint: t.renounced_mint,
+      renounced_freeze: t.renounced_freeze_account,
+      top_10_holder_rate: t.top_10_holder_rate,
+      smart_degen_count: t.smart_degen_count ?? 0,
+      renowned_count: t.renowned_count ?? 0,
+      sniper_count: t.sniper_count ?? 0,
+      launchpad: t.launchpad || t.launchpad_platform || "",
+      open_timestamp: t.open_timestamp,
+      creator: t.creator,
+      creator_token_status: t.creator_token_status,
+      _source: "gmgn_trending",
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Fetch token signals from GMGN (price spikes, smart money buys, large buys).
+ * Signal types: 1=price spike, 2=smart money buy, 3=large buy, 5=new holder spike.
+ * Returns tokens with pool_address for direct Meteora lookup.
+ * Fail-open: returns empty array on any error.
+ */
+export async function fetchGmgnSignalPools({
+  signalTypes = [1, 2, 3],
+  mcMin = 150_000,
+  mcMax = 5_000_000,
+} = {}) {
+  try {
+    const typeArgs = signalTypes.map((t) => `--signal-type ${t}`).join(" ");
+    const raw = await runGmgnCli(
+      `market signal --chain sol ${typeArgs} --mc-min ${mcMin} --mc-max ${mcMax}`,
+    );
+    const groups = Array.isArray(raw) ? raw : raw?.data ? [raw.data] : [];
+    const signals = groups.flat().filter(Boolean);
+
+    return signals
+      .filter((s) => s?.data?.pool_address && s?.data?.quote_address)
+      .map((s) => ({
+        pool_address: s.data.pool_address,
+        mint: s.data.address || s.token_address,
+        symbol: s.data.symbol || s.data.trans_symbol,
+        name: s.data.name,
+        market_cap: s.market_cap || s.data.market_cap,
+        launchpad: s.data.launchpad || s.data.launchpad_platform || "",
+        signal_type: s.signal_type,
+        signal_times: s.signal_times,
+        trigger_mc: s.trigger_mc,
+        open_timestamp: s.data.open_timestamp,
+        _source: "gmgn_signal",
+      }))
+      .filter((s, i, arr) => arr.findIndex((x) => x.pool_address === s.pool_address) === i); // dedupe by pool_address
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Fetch token info from GMGN for a specific mint.
  * Returns the raw token info object or null on error.

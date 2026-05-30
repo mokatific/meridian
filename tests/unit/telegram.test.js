@@ -50,8 +50,9 @@ describe("notifyClose", () => {
     });
 
     const msg = extractSentMessage();
-    expect(msg).toContain("🔒 <b>Closed</b> SOL-USDC");
-    expect(msg).toContain("PnL: +$1.23 (+3.45%)");
+    expect(msg).toContain("🟢 <b>Closed</b> SOL-USDC");
+    expect(msg).toContain("+$1.23");
+    expect(msg).toContain("+3.45%");
     expect(msg).toContain("Reason: take profit: good return");
     // reason appears after PnL
     const pnlIdx = msg.indexOf("PnL:");
@@ -64,8 +65,8 @@ describe("notifyClose", () => {
     await notifyClose({ pair: "SOL-USDC", pnlUsd: 1.23, pnlPct: 3.45 });
 
     const msg = extractSentMessage();
-    expect(msg).toContain("🔒 <b>Closed</b> SOL-USDC");
-    expect(msg).toContain("PnL: +$1.23 (+3.45%)");
+    expect(msg).toContain("🟢 <b>Closed</b> SOL-USDC");
+    expect(msg).toContain("+$1.23");
     expect(msg).not.toContain("Reason:");
   });
 
@@ -82,7 +83,9 @@ describe("notifyClose", () => {
     await notifyClose({ pair: "BONK-SOL", pnlUsd: 5.0, pnlPct: 12.5, reason: "take profit" });
 
     const msg = extractSentMessage();
-    expect(msg).toContain("+$5.00 (+12.50%)");
+    expect(msg).toContain("+$5.00");
+    expect(msg).toContain("+12.50%");
+    expect(msg).toContain("🟢");
   });
 
   it("shows - sign for negative PnL", async () => {
@@ -95,8 +98,10 @@ describe("notifyClose", () => {
     });
 
     const msg = extractSentMessage();
-    // sign is empty for negatives; toFixed produces "-3.78" → "$-3.78 (-9.71%)"
-    expect(msg).toContain("$-3.78 (-9.71%)");
+    // new format: -$3.78 (no dollar-sign-before-negative)
+    expect(msg).toContain("-$3.78");
+    expect(msg).toContain("-9.71%");
+    expect(msg).toContain("🔴");
   });
 
   it("handles zero PnL", async () => {
@@ -104,7 +109,8 @@ describe("notifyClose", () => {
     await notifyClose({ pair: "TEST-SOL", pnlUsd: 0, pnlPct: 0, reason: "breakeven" });
 
     const msg = extractSentMessage();
-    expect(msg).toContain("+$0.00 (+0.00%)");
+    expect(msg).toContain("+$0.00");
+    expect(msg).toContain("+0.00%");
   });
 
   it("handles null/undefined PnL gracefully", async () => {
@@ -112,7 +118,7 @@ describe("notifyClose", () => {
     await notifyClose({ pair: "TEST-SOL", pnlUsd: null, pnlPct: undefined, reason: "test" });
 
     const msg = extractSentMessage();
-    expect(msg).toContain("+$0.00 (+0.00%)");
+    expect(msg).toContain("+$0.00");
   });
 });
 
@@ -127,7 +133,7 @@ describe("notifyClose reason — real-world close_reason values from lessons.jso
     });
 
     const msg = extractSentMessage();
-    expect(msg).toContain("Reason: stop loss: PnL -3.22% <= -3%");
+    expect(msg).toContain("Reason: stop loss: PnL -3.22% &lt;= -3%");
   });
 
   it("displays user-requested close reason", async () => {

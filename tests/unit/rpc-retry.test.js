@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../logger.js", () => ({ log: vi.fn() }));
+vi.mock("../../tools/gmgn.js", () => ({ fetchGmgnGasPrice: async () => null }));
 
 // Shared mock state — reset per test
 const mockState = vi.hoisted(() => ({

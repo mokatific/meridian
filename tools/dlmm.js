@@ -748,22 +748,43 @@ async function _deployPositionInner({
   const dryRunMaxBinId = isSingleSidedSol ? activeBin.binId : activeBin.binId + activeBinsAbove;
 
   if (process.env.DRY_RUN === "true") {
+    // Compute real price range so range coverage shows correctly in dry-run output
+    const dryMinPrice = Number(getPriceOfBinByBinId(dryRunMinBinId, actualBinStep).toString());
+    const dryMaxPrice = Number(getPriceOfBinByBinId(dryRunMaxBinId, actualBinStep).toString());
+    const dryDownsidePct =
+      activePrice > 0 ? ((activePrice - dryMinPrice) / activePrice) * 100 : null;
+    const dryUpsidePct = activePrice > 0 ? ((dryMaxPrice - activePrice) / activePrice) * 100 : null;
+    const dryWidthPct = dryMinPrice > 0 ? ((dryMaxPrice - dryMinPrice) / dryMinPrice) * 100 : null;
+    const dryBaseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
+    const dryBaseFee =
+      base_fee ??
+      (dryBaseFactor > 0
+        ? parseFloat((((dryBaseFactor * actualBinStep) / 1e6) * 100).toFixed(4))
+        : null);
     return {
       success: true,
       dry_run: true,
       position: `dry_run_${Date.now()}`,
-      pool_name: pool_address.slice(0, 8),
+      pool_name,
+      bin_step: actualBinStep,
+      base_fee: dryBaseFee,
+      price_range: { min: dryMinPrice, max: dryMaxPrice },
+      range_coverage: {
+        downside_pct: dryDownsidePct,
+        upside_pct: dryUpsidePct,
+        width_pct: dryWidthPct,
+        active_price: activePrice,
+      },
       would_deploy: {
         pool_address,
         strategy: activeStrategy,
         bins_below: activeBinsBelow,
         bins_above: activeBinsAbove,
-        downside_pct: downside_pct ?? null,
-        upside_pct: upside_pct ?? null,
+        downside_pct: dryDownsidePct,
+        upside_pct: dryUpsidePct,
         amount_x: finalAmountX,
         amount_y: finalAmountY,
         wide_range: totalBins > 69,
-        // Store current price for PnL calculation in dry-run-simulator
         price: activePrice,
         active_bin: activeBin?.binId ?? null,
         lower_bin: dryRunMinBinId,

@@ -19,8 +19,14 @@
  *   RPC_URL_FALLBACK — fallback RPC (Helius)
  */
 
-import { Connection } from "@solana/web3.js";
+import {
+  Connection,
+  ComputeBudgetProgram,
+  Transaction,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { log } from "../logger.js";
+import { fetchGmgnGasPrice } from "../tools/gmgn.js";
 
 const DEFAULT_TTL_MS = 60_000; // 60s for account data
 const SHORT_TTL_MS = 30_000; // 30s for balance/program accounts
@@ -458,6 +464,16 @@ export async function sendAndConfirmPolling(connection, transaction, signers, op
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
     opts.commitment ?? "confirmed",
   );
+
+  // Inject dynamic priority fee from GMGN (legacy transactions only — VersionedTransaction
+  // is pre-built by the DLMM SDK and can't have instructions prepended after signing)
+  if (!opts.skipPriorityFee && transaction.instructions) {
+    const microLamports = await fetchGmgnGasPrice().catch(() => null);
+    if (microLamports) {
+      transaction.instructions.unshift(ComputeBudgetProgram.setComputeUnitPrice({ microLamports }));
+      log("rpc", `Priority fee: ${microLamports} microLamports`);
+    }
+  }
 
   let rawTx;
   if (transaction.message && typeof transaction.sign === "function" && !transaction.instructions) {

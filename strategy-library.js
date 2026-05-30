@@ -202,7 +202,7 @@ function ensureDefaultStrategies() {
     }
   }
   if (added) {
-    if (!db.active) db.active = "custom_ratio_spot";
+    if (!db.active) db.active = "evil_panda_small_wallet";
     save(db);
     log("strategy", "Preloaded default strategies");
   }

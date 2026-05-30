@@ -2720,15 +2720,37 @@ async function telegramHandler(msg) {
       await sendMessage(`Closing ${pos.pair}...`);
       const result = await closePosition({ position_address: pos.position });
       if (result.success) {
-        const closeTxs = result.close_txs?.length ? result.close_txs : result.txs;
-        const claimNote = result.claim_txs?.length
-          ? `\nClaim txs: ${result.claim_txs.join(", ")}`
+        const closeTxs = result.close_txs?.length ? result.close_txs : (result.txs ?? []);
+        const claimTxs = result.claim_txs ?? [];
+        const profit = (result.pnl_usd ?? 0) >= 0;
+        const pnlStr = `${profit ? "+" : "-"}$${Math.abs(result.pnl_usd ?? 0).toFixed(2)}`;
+        const pctStr =
+          result.pnl_pct != null
+            ? ` (${result.pnl_pct >= 0 ? "+" : ""}${Number(result.pnl_pct).toFixed(2)}%)`
+            : "";
+        const feesStr =
+          result.fees_usd != null ? `\nFees: $${Number(result.fees_usd).toFixed(3)}` : "";
+
+        const txLinks = closeTxs
+          .map((tx) => `<a href="https://solscan.io/tx/${tx}">Solscan</a>`)
+          .join(" · ");
+        const claimLinks = claimTxs.length
+          ? `\nClaim: ` +
+            claimTxs.map((tx) => `<a href="https://solscan.io/tx/${tx}">tx</a>`).join(" · ")
           : "";
-        await sendMessage(
-          `✅ Closed ${pos.pair}\nPnL: ${config.management.solMode ? "◎" : "$"}${result.pnl_usd ?? "?"} | close txs: ${closeTxs?.join(", ") || "n/a"}${claimNote}`,
+        const poolLink = pos.pool
+          ? `\n<a href="https://app.meteora.ag/dlmm/${pos.pool}">🌊 Meteora Pool</a>`
+          : "";
+
+        await sendHTML(
+          `${profit ? "🟢" : "🔴"} <b>Closed</b> ${pos.pair}\n` +
+            `PnL: <b>${pnlStr}</b>${pctStr}${feesStr}\n` +
+            (txLinks ? txLinks : "") +
+            claimLinks +
+            poolLink,
         );
       } else {
-        await sendMessage(`❌ Close failed: ${JSON.stringify(result)}`);
+        await sendMessage(`❌ Close failed: ${result.error || JSON.stringify(result)}`);
       }
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});

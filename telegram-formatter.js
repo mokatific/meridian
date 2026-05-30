@@ -80,7 +80,7 @@ function buildRangeBar(p, width = 10) {
     bar += ` ${pctToLower >= 0 ? "+" : ""}${pctToLower.toFixed(1)}% / ${pctToUpper >= 0 ? "+" : ""}${pctToUpper.toFixed(1)}%`;
   }
 
-  return code(bar);
+  return bar;
 }
 
 // ─── Exit label helper ──────────────────────────────────────────

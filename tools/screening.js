@@ -7,6 +7,7 @@ import { confirmIndicatorPreset } from "./chart-indicators.js";
 import { getAgentMeridianBase, getAgentMeridianHeaders } from "./agent-meridian.js";
 import { searchTokenOfficial, mapOfficialToScreening } from "./jupiter-official.js";
 import { rateLimitedDataPiFetch } from "../utils/datapi-limiter.js";
+import { fetchGmgnTrending, fetchGmgnSignalPools } from "./gmgn.js";
 
 const DATAPI_JUP = "https://datapi.jup.ag/v1";
 
@@ -203,7 +204,7 @@ export function getRawPoolScreeningRejectReason(pool, s) {
   const quote = pool?.token_y || {};
   const binStep = numeric(pool?.dlmm_params?.bin_step);
   const tvl = numeric(pool?.tvl ?? pool?.active_tvl);
-  const feeActiveTvlRatio = numeric(pool?.fee_active_tvl_ratio);
+  const feeActiveTvlRatio = numeric(pool?.effective_fee_tvl_ratio ?? pool?.fee_active_tvl_ratio);
   const volatility = numeric(pool?.volatility);
   const volume = numeric(pool?.volume);
   const holders = numeric(pool?.base_token_holders);
@@ -324,6 +325,8 @@ async function fetchPoolDiscoveryDetail({ poolAddress, timeframe }) {
   return (data.data || [])[0] ?? null;
 }
 
+const FEE_TVL_TIMEFRAMES = ["5m", "1h", "4h"];
+
 async function applyVolatilityTimeframe(rawPools, sourceTimeframe) {
   if (!Array.isArray(rawPools) || rawPools.length === 0) return rawPools;
   const volatilityTimeframe = getVolatilityTimeframe(sourceTimeframe);
@@ -336,38 +339,83 @@ async function applyVolatilityTimeframe(rawPools, sourceTimeframe) {
     pool.volatility_timeframe = volatilityTimeframe;
   }
 
-  if (sourceTimeframe === volatilityTimeframe) return rawPools;
-
   const uniquePoolAddresses = [
     ...new Set(rawPools.map((pool) => pool?.pool_address).filter(Boolean)),
   ];
-  const longResults = await Promise.allSettled(
-    uniquePoolAddresses.map((poolAddress) =>
-      fetchPoolDiscoveryDetail({ poolAddress, timeframe: volatilityTimeframe }).then((pool) => ({
-        poolAddress,
-        volatility: numeric(pool?.volatility),
-        volume: numeric(pool?.volume),
-      })),
+
+  // Fetch volatility timeframe (existing logic) + fee/TVL for 5m, 1h, 4h in parallel
+  const fetchTimeframes = [
+    ...(sourceTimeframe !== volatilityTimeframe ? [volatilityTimeframe] : []),
+    ...FEE_TVL_TIMEFRAMES.filter((tf) => tf !== sourceTimeframe),
+  ];
+
+  // Always tag primary timeframe fee/tvl first
+  for (const pool of rawPools) {
+    if (!pool) continue;
+    pool[`fee_active_tvl_${sourceTimeframe}`] = pool.fee_active_tvl_ratio ?? null;
+  }
+
+  if (fetchTimeframes.length === 0) {
+    // Only one timeframe — effective = the primary value
+    for (const pool of rawPools) {
+      if (!pool) continue;
+      pool.effective_fee_tvl_ratio = pool.fee_active_tvl_ratio ?? null;
+    }
+    return rawPools;
+  }
+
+  // Batch fetch all required timeframes concurrently
+  const allResults = await Promise.allSettled(
+    uniquePoolAddresses.flatMap((poolAddress) =>
+      fetchTimeframes.map((tf) =>
+        fetchPoolDiscoveryDetail({ poolAddress, timeframe: tf }).then((pool) => ({
+          poolAddress,
+          timeframe: tf,
+          volatility: numeric(pool?.volatility),
+          volume: numeric(pool?.volume),
+          fee_active_tvl_ratio: numeric(pool?.fee_active_tvl_ratio),
+        })),
+      ),
     ),
   );
 
-  const metricsByPool = new Map();
-  for (const result of longResults) {
+  // Index results by poolAddress+timeframe
+  const metricsByPoolTf = new Map();
+  for (const result of allResults) {
     if (result.status !== "fulfilled") continue;
-    metricsByPool.set(result.value.poolAddress, result.value);
+    const { poolAddress, timeframe, ...metrics } = result.value;
+    metricsByPoolTf.set(`${poolAddress}:${timeframe}`, { timeframe, ...metrics });
   }
 
   for (const pool of rawPools) {
     if (!pool?.pool_address) continue;
-    const metrics = metricsByPool.get(pool.pool_address);
-    if (!metrics) continue;
 
-    pool[`volume_${volatilityTimeframe}`] = metrics.volume;
-    pool[`volatility_${volatilityTimeframe}`] = metrics.volatility;
+    // Apply volatility timeframe overrides (existing behaviour)
+    if (sourceTimeframe !== volatilityTimeframe) {
+      const volMetrics = metricsByPoolTf.get(`${pool.pool_address}:${volatilityTimeframe}`);
+      if (volMetrics) {
+        pool[`volume_${volatilityTimeframe}`] = volMetrics.volume;
+        pool[`volatility_${volatilityTimeframe}`] = volMetrics.volatility;
+        if (volMetrics.volatility != null && volMetrics.volatility > 0)
+          pool.volatility = volMetrics.volatility;
+        if (volMetrics.volume != null) pool.volume = volMetrics.volume;
+      }
+    }
 
-    // Use longer-timeframe values as the canonical ones for filtering
-    if (metrics.volatility != null && metrics.volatility > 0) pool.volatility = metrics.volatility;
-    if (metrics.volume != null) pool.volume = metrics.volume;
+    // Collect fee/TVL values across all timeframes, compute effective = max
+    const feeTvlValues = [pool.fee_active_tvl_ratio]; // primary timeframe
+    for (const tf of FEE_TVL_TIMEFRAMES) {
+      if (tf === sourceTimeframe) continue;
+      const m = metricsByPoolTf.get(`${pool.pool_address}:${tf}`);
+      const val = m?.fee_active_tvl_ratio ?? null;
+      pool[`fee_active_tvl_${tf}`] = val;
+      feeTvlValues.push(val);
+    }
+    // Tag primary timeframe explicitly
+    pool[`fee_active_tvl_${sourceTimeframe}`] = pool.fee_active_tvl_ratio ?? null;
+
+    const validValues = feeTvlValues.filter((v) => v != null && Number.isFinite(v) && v > 0);
+    pool.effective_fee_tvl_ratio = validValues.length > 0 ? Math.max(...validValues) : null;
   }
 
   return rawPools;
@@ -536,7 +584,7 @@ async function refreshDiscordOnlyPools(pools, timeframe) {
     }
     // Meteora is source of truth — merge token data, params, and holders
     if (fresh.token_x && typeof fresh.token_x === "object") {
-      pool.token_x = { ...pool.token_x, ...fresh.token_x };
+      pool.token_x = { ...fresh.token_x, ...pool.token_x }; // fresh wins for missing fields
     }
     if (fresh.token_y && typeof fresh.token_y === "object") {
       pool.token_y = { ...pool.token_y, ...fresh.token_y };
@@ -547,10 +595,106 @@ async function refreshDiscordOnlyPools(pools, timeframe) {
     if (fresh.base_token_holders != null) {
       pool.base_token_holders = numeric(fresh.base_token_holders);
     }
+    // Carry over name and pool_type from fresh if skeleton didn't have them
+    if (!pool.name && fresh.name) pool.name = fresh.name;
+    if (!pool.pool_type && fresh.pool_type) pool.pool_type = fresh.pool_type;
     log(
       "screening",
-      `Discord signal refreshed live data: ${pool.name || pool.pool_address} — vol=${pool.volume?.toFixed(0)} fee=${pool.fee?.toFixed(2)}`,
+      `Signal refreshed live data: ${pool.name || pool.pool_address} — vol=${pool.volume?.toFixed(0)} fee=${pool.fee?.toFixed(2)}`,
     );
+  }
+}
+
+/**
+ * Fetch GMGN-sourced pool candidates.
+ * Combines trending tokens (mint lookup → Meteora pool) + signal pools (pool_address direct).
+ * Returns an array of raw pool skeletons tagged with _gmgn_signal metadata.
+ * Fail-open: returns [] on any error.
+ */
+async function fetchGmgnCandidatePools(s) {
+  try {
+    const interval = s.gmgnTrendingInterval ?? "1h";
+    const mcMin = s.minMcap ?? 150_000;
+    const mcMax = s.maxMcap ?? 5_000_000;
+
+    const [trending, signals] = await Promise.all([
+      fetchGmgnTrending({ interval, limit: 100 }).catch(() => []),
+      fetchGmgnSignalPools({ mcMin, mcMax }).catch(() => []),
+    ]);
+
+    // Collect pool_addresses from signals (already have them)
+    const signalByPool = new Map();
+    for (const sig of signals) {
+      if (sig.pool_address) signalByPool.set(sig.pool_address, sig);
+    }
+
+    // Resolve trending tokens → Meteora DLMM pool via mint search
+    const trendingMints = trending.filter((t) => t.mint && !t.is_wash_trading).map((t) => t.mint);
+
+    const mintPoolResults = await Promise.allSettled(
+      trendingMints.map((mint) =>
+        fetchPoolDiscoveryDetail({
+          poolAddress: mint, // datapi supports mint search via pool detail endpoint
+          timeframe: s.timeframe,
+        })
+          .then((pool) => (pool?.pool_address ? pool : null))
+          .catch(() => null),
+      ),
+    );
+
+    const byPool = new Map();
+
+    // Add signal pools first (have pool_address directly)
+    for (const sig of signalByPool.values()) {
+      byPool.set(sig.pool_address, {
+        pool_address: sig.pool_address,
+        name: sig.name || `${sig.symbol ?? "?"}-SOL`,
+        pool_type: "dlmm",
+        token_x: sig.mint ? { address: sig.mint } : null,
+        gmgn_signal: true,
+        gmgn_signal_type: sig.signal_type,
+        gmgn_signal_times: sig.signal_times,
+      });
+    }
+
+    // Add trending token pools (resolved via mint search)
+    for (let i = 0; i < trendingMints.length; i++) {
+      const result = mintPoolResults[i];
+      if (result.status !== "fulfilled" || !result.value) continue;
+      const pool = result.value;
+      const trendingMeta = trending.find((t) => t.mint === trendingMints[i]);
+      if (!byPool.has(pool.pool_address)) {
+        byPool.set(pool.pool_address, {
+          ...pool,
+          gmgn_trending: true,
+          gmgn_bundler_rate: trendingMeta?.bundler_rate,
+          gmgn_smart_degen: trendingMeta?.smart_degen_count,
+          gmgn_renowned: trendingMeta?.renowned_count,
+        });
+      } else {
+        // Signal pool already present — enrich with trending metadata
+        const existing = byPool.get(pool.pool_address);
+        byPool.set(pool.pool_address, {
+          ...existing,
+          ...pool,
+          gmgn_signal: existing.gmgn_signal ?? false,
+          gmgn_trending: true,
+          gmgn_bundler_rate: trendingMeta?.bundler_rate,
+          gmgn_smart_degen: trendingMeta?.smart_degen_count,
+          gmgn_renowned: trendingMeta?.renowned_count,
+        });
+      }
+    }
+
+    const pools = Array.from(byPool.values());
+    log(
+      "screening",
+      `GMGN sourced ${pools.length} candidate pool(s) (${signals.length} signals + ${trending.length} trending)`,
+    );
+    return pools;
+  } catch (err) {
+    log("screening", `GMGN candidate fetch failed: ${err.message}`);
+    return [];
   }
 }
 
@@ -655,6 +799,46 @@ export async function discoverPools({ page_size = 50 } = {}) {
       // so volume/volatility/fee may be 0 even when the pool is active right now
       if (discordOnlyPools.length > 0) {
         await refreshDiscordOnlyPools(discordOnlyPools, s.timeframe);
+      }
+    }
+  }
+
+  // ── GMGN Screening Source ───────────────────────────────────
+  if (config.screening.useGmgnScreening) {
+    const gmgnPools = await fetchGmgnCandidatePools(s).catch((err) => {
+      log("screening", `GMGN screening fetch failed: ${err.message}`);
+      return [];
+    });
+
+    if (config.screening.gmgnScreeningMode === "only") {
+      rawPools = gmgnPools;
+      await refreshDiscordOnlyPools(rawPools, s.timeframe); // reuse refresh logic — same pattern
+    } else if (gmgnPools.length > 0) {
+      // merge mode: add GMGN pools not already in Meteora results
+      const byPool = new Map(rawPools.map((pool) => [pool.pool_address, pool]));
+      const gmgnOnly = [];
+      for (const gmgnPool of gmgnPools) {
+        if (byPool.has(gmgnPool.pool_address)) {
+          // Already in Meteora — tag with GMGN signal metadata
+          const existing = byPool.get(gmgnPool.pool_address);
+          byPool.set(gmgnPool.pool_address, {
+            ...existing,
+            gmgn_signal: gmgnPool.gmgn_signal ?? existing.gmgn_signal ?? false,
+            gmgn_trending: gmgnPool.gmgn_trending ?? existing.gmgn_trending ?? false,
+            gmgn_signal_type: gmgnPool.gmgn_signal_type ?? existing.gmgn_signal_type,
+            gmgn_signal_times: gmgnPool.gmgn_signal_times ?? existing.gmgn_signal_times,
+            gmgn_bundler_rate: gmgnPool.gmgn_bundler_rate ?? existing.gmgn_bundler_rate,
+            gmgn_smart_degen: gmgnPool.gmgn_smart_degen ?? existing.gmgn_smart_degen,
+            gmgn_renowned: gmgnPool.gmgn_renowned ?? existing.gmgn_renowned,
+          });
+        } else {
+          byPool.set(gmgnPool.pool_address, gmgnPool);
+          gmgnOnly.push(gmgnPool);
+        }
+      }
+      rawPools = Array.from(byPool.values());
+      if (gmgnOnly.length > 0) {
+        await refreshDiscordOnlyPools(gmgnOnly, s.timeframe);
       }
     }
   }
@@ -1064,6 +1248,11 @@ function condensePool(p) {
     fee_window: round(p.fee),
     volume_window: round(p.volume),
     fee_active_tvl_ratio: p.fee_active_tvl_ratio != null ? fix(p.fee_active_tvl_ratio, 4) : null,
+    effective_fee_tvl_ratio:
+      p.effective_fee_tvl_ratio != null ? fix(p.effective_fee_tvl_ratio, 4) : null,
+    fee_active_tvl_5m: p.fee_active_tvl_5m != null ? fix(p.fee_active_tvl_5m, 4) : null,
+    fee_active_tvl_1h: p.fee_active_tvl_1h != null ? fix(p.fee_active_tvl_1h, 4) : null,
+    fee_active_tvl_4h: p.fee_active_tvl_4h != null ? fix(p.fee_active_tvl_4h, 4) : null,
     volatility: p.volatility > 0 ? fix(p.volatility, 4) : null,
     volatility_timeframe:
       p.volatility_timeframe || getVolatilityTimeframe(config.screening.timeframe),
@@ -1108,6 +1297,15 @@ function condensePool(p) {
     discord_signal_count: p.discord_signal_count || 0,
     discord_signal_seen_count: p.discord_signal_seen_count || 0,
     discord_signal_last_seen_at: p.discord_signal_last_seen_at || null,
+
+    // GMGN signal metadata
+    gmgn_signal: Boolean(p.gmgn_signal),
+    gmgn_trending: Boolean(p.gmgn_trending),
+    gmgn_signal_type: p.gmgn_signal_type ?? null,
+    gmgn_signal_times: p.gmgn_signal_times ?? null,
+    gmgn_bundler_rate: p.gmgn_bundler_rate ?? null,
+    gmgn_smart_degen: p.gmgn_smart_degen ?? null,
+    gmgn_renowned: p.gmgn_renowned ?? null,
 
     // Price action
     price: p.pool_price,

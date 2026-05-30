@@ -3,6 +3,21 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { log } from "./logger.js";
 
+// ─── Explorer link helpers ────────────────────────────────────
+function solscanTx(sig) {
+  return sig ? `<a href="https://solscan.io/tx/${sig}">🔗 Solscan</a>` : null;
+}
+function solscanAccount(addr) {
+  return addr ? `<a href="https://solscan.io/account/${addr}">📋 Position</a>` : null;
+}
+function meteoraPool(addr) {
+  return addr ? `<a href="https://app.meteora.ag/dlmm/${addr}">🌊 Meteora</a>` : null;
+}
+function fmtLinks(...links) {
+  const valid = links.filter(Boolean);
+  return valid.length ? valid.join(" · ") : null;
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
 
@@ -638,6 +653,7 @@ export function stopPolling() {
 // ─── Notification helpers ────────────────────────────────────────
 export async function notifyDeploy({
   pair,
+  pool,
   amountSol,
   position,
   tx,
@@ -649,40 +665,43 @@ export async function notifyDeploy({
   narrative,
 }) {
   if (hasActiveLiveMessage()) return;
-  const icon = dryRun ? "🧪" : "✅";
+  const icon = dryRun ? "🧪" : "🚀";
   const label = dryRun ? "Deployed (DRY RUN)" : "Deployed";
+
   const priceStr = priceRange
-    ? `Price range: ${priceRange.min < 0.0001 ? priceRange.min.toExponential(3) : priceRange.min.toFixed(6)} – ${priceRange.max < 0.0001 ? priceRange.max.toExponential(3) : priceRange.max.toFixed(6)}\n`
+    ? `Price: ${priceRange.min < 0.0001 ? priceRange.min.toExponential(3) : priceRange.min.toFixed(6)} – ${priceRange.max < 0.0001 ? priceRange.max.toExponential(3) : priceRange.max.toFixed(6)}\n`
     : "";
   const coverageStr = rangeCoverage
-    ? `Range cover: ${fmtPct(rangeCoverage.downside_pct)} downside | ${fmtPct(rangeCoverage.upside_pct)} upside | ${fmtPct(rangeCoverage.width_pct)} total\n`
+    ? `Range: ${fmtPct(rangeCoverage.downside_pct)} ↓ | ${fmtPct(rangeCoverage.upside_pct)} ↑ | ${fmtPct(rangeCoverage.width_pct)} total\n`
     : "";
   const poolStr =
     binStep || baseFee
-      ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
+      ? `Bin step: ${binStep ?? "?"}  ·  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
       : "";
-  const posStr = dryRun
-    ? `Mode: DRY RUN — no real transaction sent\n`
-    : `Position: <code>${position?.slice(0, 8)}...</code>\nTx: <code>${tx?.slice(0, 16)}...</code>`;
-  const narrativeStr = narrative ? `\n\n📖 Narrative\n${normalizeText(narrative)}` : "";
-  // Gas cost estimate for live reference
-  const gasEstimate = dryRun
-    ? `\n⛽ Est. gas (live): ~0.0005 SOL (~$${(0.0005 * 80).toFixed(3)})\n`
-    : "";
+
+  const links = dryRun
+    ? `🧪 DRY RUN — no real transaction sent`
+    : [solscanAccount(position), tx ? solscanTx(tx) : null, pool ? meteoraPool(pool) : null]
+        .filter(Boolean)
+        .join(" · ");
+
+  const narrativeStr = narrative ? `\n\n📖 <i>${normalizeText(narrative).slice(0, 200)}</i>` : "";
+
   await sendHTML(
     `${icon} <b>${label}</b> ${pair}\n` +
-      `Amount: ${amountSol} SOL\n` +
+      `◎ ${amountSol} SOL\n` +
       priceStr +
       coverageStr +
       poolStr +
-      posStr +
-      gasEstimate +
+      links +
       narrativeStr,
   );
 }
 
 export async function notifyClose({
   pair,
+  pool,
+  position,
   pnlUsd,
   pnlPct,
   reason,
@@ -690,51 +709,66 @@ export async function notifyClose({
   minutesHeld,
   priceChangePct,
   dryRun,
-  amountSol,
+  txs,
 }) {
   if (hasActiveLiveMessage()) return;
-  const sign = pnlUsd >= 0 ? "+" : "";
-  const reasonLine = reason ? `Reason: ${reason}\n` : "";
-  const feesLine = feesUsd != null ? `Fees earned: $${feesUsd.toFixed(3)}\n` : "";
+
+  const profit = (pnlUsd ?? 0) >= 0;
+  const icon = dryRun ? "🧪" : profit ? "🟢" : "🔴";
+  const label = dryRun ? "Closed (DRY RUN)" : "Closed";
+  const pnlStr = `${profit ? "+" : "-"}$${Math.abs(pnlUsd ?? 0).toFixed(2)}`;
+  const pctStr = `${(pnlPct ?? 0) >= 0 ? "+" : ""}${(pnlPct ?? 0).toFixed(2)}%`;
+
+  const feesLine = feesUsd != null ? `Fees: $${feesUsd.toFixed(3)}\n` : "";
   const holdLine = minutesHeld != null ? `Held: ${minutesHeld}m\n` : "";
   const priceChangeLine =
     priceChangePct != null
       ? `Price Δ: ${priceChangePct >= 0 ? "+" : ""}${priceChangePct.toFixed(1)}%\n`
       : "";
-  const icon = dryRun ? "🧪" : "🔒";
-  const label = dryRun ? "Closed (DRY RUN)" : "Closed";
+  const reasonLine = reason ? `Reason: ${escapeHtml(String(reason).slice(0, 100))}\n` : "";
 
-  // Gas cost + real net PnL for dry-run (so you know what live would look like)
+  // Gas estimate for dry-run
   let gasLine = "";
   let netLine = "";
   if (dryRun) {
-    const gasDeploy = 0.0005 * 80; // ~$0.04
-    const gasClose = 0.0002 * 80; // ~$0.016
-    const totalGas = gasDeploy + gasClose;
+    const totalGas = (0.0005 + 0.0002) * 80;
     const netPnl = (pnlUsd ?? 0) - totalGas;
-    const netSign = netPnl >= 0 ? "+" : "";
-    gasLine = `⛽ Est. gas (live): ~$${totalGas.toFixed(3)} (deploy+close)\n`;
-    netLine = `📊 Net after gas: ${netSign}$${netPnl.toFixed(3)}\n`;
+    gasLine = `⛽ Gas est: ~$${totalGas.toFixed(3)}\n`;
+    netLine = `📊 Net: ${netPnl >= 0 ? "+" : "-"}$${Math.abs(netPnl).toFixed(3)}\n`;
   }
+
+  // Explorer links for live closes
+  const firstTx = Array.isArray(txs) ? txs[0] : txs;
+  const links = !dryRun
+    ? [
+        firstTx ? solscanTx(firstTx) : null,
+        pool ? meteoraPool(pool) : null,
+        position ? solscanAccount(position) : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
 
   await sendHTML(
     `${icon} <b>${label}</b> ${pair}\n` +
-      `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)\n` +
+      `PnL: <b>${pnlStr}</b> (${pctStr})\n` +
       feesLine +
       holdLine +
       priceChangeLine +
       gasLine +
       netLine +
-      reasonLine,
+      reasonLine +
+      (links ? links : ""),
   );
 }
 
 export async function notifySwap({ inputSymbol, outputSymbol, amountIn, amountOut, tx }) {
   if (hasActiveLiveMessage()) return;
+  const links = tx ? `\n${solscanTx(tx)}` : "";
   await sendHTML(
     `🔄 <b>Swapped</b> ${inputSymbol} → ${outputSymbol}\n` +
-      `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}\n` +
-      `Tx: <code>${tx?.slice(0, 16)}...</code>`,
+      `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}` +
+      links,
   );
 }
 
