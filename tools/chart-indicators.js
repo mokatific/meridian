@@ -378,7 +378,7 @@ export async function confirmIndicatorPreset({
   side,
   preset = side === "entry" ? config.indicators.entryPreset : config.indicators.exitPreset,
   intervals = config.indicators.intervals,
-  refresh = false,
+  refresh = true, // REQUIRED for true RSI-2: the API caches per-mint and ignores rsiLength on cache hits (see fetchFullPanel)
 } = {}) {
   if (!config.indicators.enabled || !mint || !preset) {
     return {
