@@ -282,7 +282,8 @@ echo ""
 # Per-file Y/N selection
 declare -a APPROVED_FILES=()
 for f in "${CHANGED_FILES[@]}"; do
-  read -rp "  ${CYAN}${f}${NC} — ${MODE}? [Y/n/a(all)/q(quit)] " answer
+  printf "  \033[0;36m%s\033[0m — %s? [Y/n/a(all)/q(quit)] " "$f" "$MODE"
+  read -r answer
   answer="${answer:-y}"
   case "$answer" in
     [Yy]) APPROVED_FILES+=("$f") ;;
