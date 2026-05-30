@@ -104,8 +104,8 @@ memory/
 # ============================================
 # Dashboard (Next.js)
 # ============================================
-dashboard/.next/
-dashboard/node_modules/
-dashboard/.env.local
+apps/meriswarm/.next/
+apps/meriswarm/node_modules/
+apps/meriswarm/.env.local
 gmgn_private.pem
 gmgn_public.pem
