@@ -65,6 +65,7 @@ FILES=(
   position-journal.db-shm
   position-journal.db-wal
   config-snapshots.json
+  .env
 )
 
 # ─── Usage / mode ─────────────────────────────────────────────────────────────
@@ -257,16 +258,13 @@ if [ ${#CHANGED_FILES[@]} -eq 0 ]; then
 fi
 
 # ─── Confirm ──────────────────────────────────────────────────────────────────
-echo -e "${BOLD}${#CHANGED_FILES[@]} file(s) will be ${MODE}ed:${NC}"
-for f in "${CHANGED_FILES[@]}"; do
-  echo -e "  • $f"
-done
+echo -e "${BOLD}${#CHANGED_FILES[@]} file(s) differ.${NC} Review each one:"
 echo ""
 
 if [ "$MODE" = "pull" ]; then
-  echo -e "${YELLOW}⚠  This will overwrite your LOCAL files with the server versions.${NC}"
+  echo -e "${YELLOW}⚠  Y will overwrite your LOCAL file with the server version.${NC}"
 else
-  echo -e "${YELLOW}⚠  This will overwrite SERVER files with your local versions.${NC}"
+  echo -e "${YELLOW}⚠  Y will overwrite the SERVER file with your local version.${NC}"
 fi
 
 # Warn about SQLite WAL files if present
@@ -280,22 +278,58 @@ if [ ${#db_files[@]} -gt 0 ]; then
 fi
 
 echo ""
-read -rp "Proceed with ${MODE}? [y/N] " confirm
+
+# Per-file Y/N selection
+declare -a APPROVED_FILES=()
+for f in "${CHANGED_FILES[@]}"; do
+  read -rp "  ${CYAN}${f}${NC} — ${MODE}? [Y/n/a(all)/q(quit)] " answer
+  answer="${answer:-y}"
+  case "$answer" in
+    [Yy]) APPROVED_FILES+=("$f") ;;
+    [Aa])
+      # Accept all remaining files
+      APPROVED_FILES+=("$f")
+      for remaining in "${CHANGED_FILES[@]}"; do
+        [[ "$remaining" == "$f" ]] && continue
+        # Only add files not already added
+        already=false
+        for already_added in "${APPROVED_FILES[@]}"; do
+          [[ "$already_added" == "$remaining" ]] && already=true && break
+        done
+        $already || APPROVED_FILES+=("$remaining")
+      done
+      echo -e "  ${DIM}(all remaining accepted)${NC}"
+      break
+      ;;
+    [Qq])
+      echo ""
+      echo "Aborted."
+      exit 0
+      ;;
+    *) echo -e "  ${DIM}skipped${NC}" ;;
+  esac
+done
+
 echo ""
-case "$confirm" in
-  [Yy] | [Yy][Ee][Ss]) ;;
-  *)
-    echo "Aborted."
-    exit 0
-    ;;
-esac
+
+if [ ${#APPROVED_FILES[@]} -eq 0 ]; then
+  echo -e "${DIM}No files selected. Nothing to ${MODE}.${NC}"
+  echo ""
+  exit 0
+fi
+
+echo -e "${BOLD}${#APPROVED_FILES[@]} file(s) will be ${MODE}ed:${NC}"
+for f in "${APPROVED_FILES[@]}"; do
+  echo -e "  • $f"
+done
+echo ""
 
 # ─── Execute ──────────────────────────────────────────────────────────────────
 RSYNC_OPTS=(-az --no-perms --no-owner --no-group --progress -e "$RSYNC_RSH")
 success=0
 fail=0
 
-for file in "${CHANGED_FILES[@]}"; do
+for file in "${APPROVED_FILES[@]}"; do
   printf "  %-34s" "${file}..."
   if [ "$MODE" = "pull" ]; then
     src="${REMOTE}:${REMOTE_PATH}/${file}"
