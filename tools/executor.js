@@ -105,13 +105,30 @@ async function fetchFreshPoolDetail(poolAddress, timeframe = config.screening.ti
   const encodedTimeframe = encodeURIComponent(timeframe);
   const filter = encodeURIComponent(`pool_address=${poolAddress}`);
   const url = `${POOL_DISCOVERY_BASE}/pools?page_size=1&filter_by=${filter}&timeframe=${encodedTimeframe}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Pool Discovery API error: ${res.status} ${res.statusText}`);
-  const data = await res.json();
-  return (data?.data || [])[0] ?? null;
+
+  // Retry up to 3 times on 429 with exponential backoff
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url);
+    if (res.status === 429) {
+      if (attempt < 2) {
+        const wait = 2000 * (attempt + 1);
+        log("executor", `Pool Discovery 429 — retrying in ${wait}ms (attempt ${attempt + 1}/3)`);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      throw new Error(`Pool Discovery API error: 429 Too Many Requests`);
+    }
+    if (!res.ok) throw new Error(`Pool Discovery API error: ${res.status} ${res.statusText}`);
+    const data = await res.json();
+    return (data?.data || [])[0] ?? null;
+  }
+  throw new Error(`Pool Discovery API error: 429 Too Many Requests`);
 }
 
 async function validateDeployPoolThresholds(args) {
+  // In dry-run mode the pool was already screened — skip the extra API call to avoid 429s
+  if (process.env.DRY_RUN === "true") return { pass: true };
+
   let detail;
   try {
     detail = await fetchFreshPoolDetail(args.pool_address);

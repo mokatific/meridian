@@ -606,7 +606,9 @@ export async function runManagementCycle({ silent = false } = {}) {
       const statusLabel = act.action === "INSTRUCTION" ? "HOLD (instruction)" : act.action;
       const cur = config.management.solMode ? "◎" : "$";
       const pnlStr =
-        p.pnl_usd != null ? `${p.pnl_usd >= 0 ? "+" : ""}${cur}${p.pnl_usd.toFixed(2)}` : "?";
+        p.pnl_usd != null
+          ? `${p.pnl_usd >= 0 ? "+" : "-"}${cur}${Math.abs(p.pnl_usd).toFixed(2)}`
+          : "?";
       let line = `**${p.pair}** | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${pnlStr} (${p.pnl_pct ?? "?"}%) | Yield: ${p.fee_per_tvl_24h ?? "?"}% | Strat: ${p.strategy ?? "?"} | ${inRange} | ${statusLabel}`;
       const bar = buildRangeBar(p);
       if (bar) line += `\n${bar}`;
@@ -1218,7 +1220,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     const agentResult = await withTimeout(
       agentLoop(
         `
-SCREENING CYCLE
+SCREENING CYCLE${process.env.DRY_RUN === "true" ? " [🧪 DRY RUN — no real transactions will be sent]" : ""}
 ${strategyBlock}
 Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${currentBalance.sol.toFixed(3)} | Deploy: ${deployAmount} SOL
 
@@ -2597,6 +2599,18 @@ async function telegramHandler(msg) {
     );
     return;
   }
+  // Lightweight commands that must bypass the busy queue and never reach the LLM
+  if (text === "/simreset") {
+    if (process.env.DRY_RUN !== "true") {
+      await sendMessage("⚠️ /simreset only works in dry-run mode (DRY_RUN=true).").catch(() => {});
+      return;
+    }
+    const result = resetVirtualTrading();
+    await sendMessage(
+      `🔄 <b>Virtual trading reset</b>\n\nBalance restored to ${result.initialBalance} SOL\nAll virtual positions and history cleared.\n\nReady for a fresh test run.`,
+    ).catch(() => {});
+    return;
+  }
   if (_managementBusy || _screeningBusy || busy) {
     if (_telegramQueue.length < 5) {
       _telegramQueue.push(msg);
@@ -2885,18 +2899,6 @@ async function telegramHandler(msg) {
       await evaluateVirtualPositions().catch(() => {});
     }
     await sendMessage(getVirtualSummary()).catch(() => {});
-    return;
-  }
-
-  if (text === "/simreset") {
-    if (process.env.DRY_RUN !== "true") {
-      await sendMessage("⚠️ /simreset only works in dry-run mode (DRY_RUN=true).").catch(() => {});
-      return;
-    }
-    const result = resetVirtualTrading();
-    await sendMessage(
-      `🔄 <b>Virtual trading reset</b>\n\nBalance restored to ${result.initialBalance} SOL\nAll virtual positions and history cleared.\n\nReady for a fresh test run.`,
-    ).catch(() => {});
     return;
   }
 

@@ -840,9 +840,12 @@ export async function agentLoop(
           }
 
           // Lock deploy_position after first attempt regardless of outcome — retrying is never right
-          // For close/swap: only lock on success so genuine failures can be retried
-          if (NO_RETRY_TOOLS.has(functionName)) firedOnce.add(functionName);
-          else if (ONCE_PER_SESSION.has(functionName) && result.success === true)
+          // Exception: SAFETY_BLOCK (blocked: true) and API errors mean no execution occurred — allow retry on another pool
+          if (NO_RETRY_TOOLS.has(functionName)) {
+            const wasBlocked = result?.blocked === true;
+            const wasApiError = !result?.success && result?.reason?.includes("API error");
+            if (!wasBlocked && !wasApiError) firedOnce.add(functionName);
+          } else if (ONCE_PER_SESSION.has(functionName) && result.success === true)
             firedOnce.add(functionName);
 
           return {

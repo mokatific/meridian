@@ -52,13 +52,13 @@ export async function generateBriefing() {
     `📤 Positions Closed: ${closedLast24h.length}`,
     "",
     `<b>Performance:</b>`,
-    `💰 Net PnL: ${totalPnLUsd >= 0 ? "+" : ""}$${totalPnLUsd.toFixed(2)}`,
+    `💰 Net PnL: ${totalPnLUsd >= 0 ? "+" : "-"}$${Math.abs(totalPnLUsd).toFixed(2)}`,
     `💎 Fees Earned: $${totalFeesUsd.toFixed(2)}`,
     meaningfulCloses.length > 0
       ? `📈 Win Rate (24h): ${Math.round((wins.length / meaningfulCloses.length) * 100)}% (${wins.length}W/${losses.length}L, ${perfLast24h.length - meaningfulCloses.length} neutral excluded)`
       : "📈 Win Rate (24h): N/A (no meaningful closes)",
     meaningfulCloses.length > 0
-      ? `📊 Avg PnL: ${totalPnLUsd / meaningfulCloses.length >= 0 ? "+" : ""}$${(totalPnLUsd / meaningfulCloses.length).toFixed(2)}/position`
+      ? `📊 Avg PnL: ${totalPnLUsd / meaningfulCloses.length >= 0 ? "+" : "-"}$${Math.abs(totalPnLUsd / meaningfulCloses.length).toFixed(2)}/position`
       : "",
     "",
     `<b>Lessons Learned:</b>`,
@@ -67,7 +67,7 @@ export async function generateBriefing() {
     `<b>Current Portfolio:</b>`,
     `📂 Open Positions: ${openPositions.length}`,
     perfSummary
-      ? `📊 All-time PnL: $${perfSummary.total_pnl_usd.toFixed(2)} (${perfSummary.win_rate_pct}% win)`
+      ? `📊 All-time PnL: ${perfSummary.total_pnl_usd >= 0 ? "+" : "-"}$${Math.abs(perfSummary.total_pnl_usd).toFixed(2)} (${perfSummary.win_rate_pct}% win)`
       : "",
     ...(process.env.DRY_RUN === "true"
       ? (() => {

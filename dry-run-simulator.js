@@ -711,7 +711,7 @@ export function getVirtualSummary() {
       const age = Math.floor((Date.now() - new Date(p.deployed_at).getTime()) / 60000);
       const live = p._live;
       const pnlStr = live
-        ? ` | PnL: ${live.pnl_pct >= 0 ? "+" : ""}${live.pnl_pct.toFixed(1)}% ($${live.pnl_usd >= 0 ? "+" : ""}${live.pnl_usd.toFixed(2)}) | fees: $${live.fees_usd.toFixed(3)} | ${live.in_range ? "IN" : "OOR"} | src: ${live.price_source}`
+        ? ` | PnL: ${live.pnl_pct >= 0 ? "+" : ""}${live.pnl_pct.toFixed(1)}% (${live.pnl_usd >= 0 ? "+" : "-"}$${Math.abs(live.pnl_usd).toFixed(2)}) | fees: $${live.fees_usd.toFixed(3)} | ${live.in_range ? "IN" : "OOR"} | src: ${live.price_source}`
         : "";
       lines.push(`${i + 1}. ${p.pool_name} | ${p.amount_sol} SOL | ${age}m old${pnlStr}`);
     });
