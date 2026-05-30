@@ -125,10 +125,9 @@ export function runCausalAnalysis(perfData) {
     perfData,
     (p) => extractTokenAge(p),
     [
-      { label: "very_new (<6h)", min: 0, max: 6 },
-      { label: "new (6-24h)", min: 6, max: 24 },
-      { label: "established (1-7d)", min: 24, max: 168 },
-      { label: "mature (>7d)", min: 168, max: Infinity },
+      { label: "young (<12h)", min: 0, max: 12 },
+      { label: "sweet (12-48h)", min: 12, max: 48 },
+      { label: "mature (>48h)", min: 48, max: Infinity },
     ],
     "token_age_hours",
   );
@@ -140,10 +139,14 @@ export function runCausalAnalysis(perfData) {
       recommendations.push({
         type: "screening",
         insight: `Token age: ${best.label} → ${(best.win_rate * 100).toFixed(0)}% win rate vs ${worst.label} → ${(worst.win_rate * 100).toFixed(0)}%.`,
-        action: worst.label.includes("very_new")
-          ? "Avoid tokens under 6h old. Consider setting minTokenAgeHours=6."
-          : `Best results with ${best.label} tokens. Adjust minTokenAgeHours/maxTokenAgeHours.`,
-        config_suggestion: worst.label.includes("very_new") ? { minTokenAgeHours: 6 } : null,
+        action: best.label.includes("sweet")
+          ? "Bias toward 12-48h tokens with enough volume. Keep token_age_bucket surfaced and use the learned weights; do not hard-block young or mature tokens."
+          : `Best results with ${best.label} tokens. Surface token_age_bucket and let Darwin learn the bucket weights from outcomes.`,
+        config_suggestion: {
+          surfaceTokenAge: true,
+          tokenAgeSweetMinHours: 12,
+          tokenAgeSweetMaxHours: 48,
+        },
         confidence: "high",
       });
     }

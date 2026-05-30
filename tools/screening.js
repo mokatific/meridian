@@ -1,4 +1,6 @@
 import { config } from "../config.js";
+import { classifyTokenAgeBucket } from "../signal-weights.js";
+import { classifyTokenAgeBucket } from "../signal-weights.js";
 import { isBlacklisted } from "../token-blacklist.js";
 import { isDevBlocked, getBlockedDevs } from "../dev-blocklist.js";
 import { log } from "../logger.js";
@@ -88,6 +90,13 @@ export function computeRankScore(candidate) {
     momentum * w.momentum;
 
   const score = Math.round(weighted * 100) / 100;
+  const tokenAgeHours = p.token_x?.created_at
+    ? Math.floor((Date.now() - p.token_x.created_at) / 3_600_000)
+    : null;
+  const tokenAgeBucket = config.screening.surfaceTokenAge
+    ? classifyTokenAgeBucket(tokenAgeHours, config)
+    : null;
+
   return {
     score,
     breakdown: { fee_tvl, smart_wallets, narrative, organic, volume, risk, momentum },
@@ -1283,9 +1292,8 @@ function condensePool(p) {
     holders: p.base_token_holders,
     mcap: round(p.token_x?.market_cap),
     organic_score: Math.round(p.token_x?.organic_score || 0),
-    token_age_hours: p.token_x?.created_at
-      ? Math.floor((Date.now() - p.token_x.created_at) / 3_600_000)
-      : null,
+    token_age_hours: tokenAgeHours,
+    ...(tokenAgeBucket ? { token_age_bucket: tokenAgeBucket } : {}),
     dev: p.token_x?.dev || null,
     launchpad: getPoolLaunchpad(p),
 

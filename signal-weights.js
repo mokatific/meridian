@@ -25,12 +25,25 @@ const SIGNAL_NAMES = [
   "smart_wallets_present",
   "smart_wallet_confidence",
   "narrative_quality",
+  "token_age_bucket",
   "study_win_rate",
   "hive_consensus",
   "volatility",
 ];
 
 const DEFAULT_WEIGHTS = Object.fromEntries(SIGNAL_NAMES.map((s) => [s, 1.0]));
+
+const CATEGORICAL_SIGNAL_BUCKETS = {
+  narrative_quality: ["present", "absent"],
+  token_age_bucket: ["young", "sweet", "mature"],
+};
+
+const DEFAULT_CATEGORICAL_WEIGHTS = Object.fromEntries(
+  Object.entries(CATEGORICAL_SIGNAL_BUCKETS).map(([signal, buckets]) => [
+    signal,
+    Object.fromEntries(buckets.map((bucket) => [bucket, 1.0])),
+  ]),
+);
 
 // Signals where higher values generally indicate better candidates
 const HIGHER_IS_BETTER = new Set([
@@ -47,14 +60,124 @@ const HIGHER_IS_BETTER = new Set([
 const BOOLEAN_SIGNALS = new Set(["smart_wallets_present"]);
 
 // Categorical signals — compared by win rate across categories
-const CATEGORICAL_SIGNALS = new Set(["narrative_quality"]);
+const CATEGORICAL_SIGNALS = new Set(Object.keys(CATEGORICAL_SIGNAL_BUCKETS));
+function createDefaultWeights() {
+  return {
+    ...DEFAULT_WEIGHTS,
+    ...Object.fromEntries(
+      Object.entries(DEFAULT_CATEGORICAL_WEIGHTS).map(([signal, buckets]) => [
+        signal,
+        { ...buckets },
+      ]),
+    ),
+  };
+}
+
+function ensureWeightsShape(weights) {
+  const next = { ...(weights || {}) };
+  for (const name of SIGNAL_NAMES) {
+    if (CATEGORICAL_SIGNALS.has(name)) {
+      const buckets = DEFAULT_CATEGORICAL_WEIGHTS[name];
+      const current = next[name];
+      if (!current || typeof current !== "object" || Array.isArray(current)) {
+        next[name] = { ...buckets };
+        continue;
+      }
+      for (const bucket of Object.keys(buckets)) {
+        if (next[name][bucket] == null) next[name][bucket] = 1.0;
+      }
+    } else if (next[name] == null || typeof next[name] !== "number") {
+      next[name] = 1.0;
+    }
+  }
+  return next;
+}
+
+function clampWeight(val, floor, ceiling) {
+  return Math.max(floor, Math.min(ceiling, val));
+}
+
+export function classifyTokenAgeBucket(tokenAgeHours, cfg = {}) {
+  const screening = cfg.screening || cfg;
+  const minSweet = Number(screening.tokenAgeSweetMinHours ?? 12);
+  const maxSweet = Number(screening.tokenAgeSweetMaxHours ?? 48);
+  const age = Number(tokenAgeHours);
+  if (!Number.isFinite(age) || age < 0) return null;
+  if (age < minSweet) return "young";
+  if (age <= maxSweet) return "sweet";
+  return "mature";
+}
+
+function bucketLabel(signal, bucket) {
+  return `${signal}:${bucket}`;
+}
+
+function summarizeCategoricalWeights(signal, weights) {
+  const buckets = CATEGORICAL_SIGNAL_BUCKETS[signal] || [];
+  const lines = [`  ${signal} (categorical):`];
+  for (const bucket of buckets) {
+    const val = Number(weights?.[bucket] ?? 1.0);
+    lines.push(
+      `    ${bucket.padEnd(12)} ${val.toFixed(2)}  ${weightBar(val)}  ${interpretWeight(val)}`,
+    );
+  }
+  return lines;
+}
+
+function computeCategoricalWeights(signal, wins, losses, minSamples, weightFloor, weightCeiling) {
+  const buckets = CATEGORICAL_SIGNAL_BUCKETS[signal] || [];
+  const stats = Object.fromEntries(buckets.map((bucket) => [bucket, { wins: 0, total: 0 }]));
+  let overallWins = 0;
+  let overallTotal = 0;
+
+  for (const { w, snap } of [
+    ...wins.map((entry) => ({ w: true, snap: entry })),
+    ...losses.map((entry) => ({ w: false, snap: entry })),
+  ]) {
+    const val = getEntrySignalSnapshot(snap)?.[signal];
+    if (val === undefined || val === null || !stats[val]) continue;
+    stats[val].total += 1;
+    overallTotal += 1;
+    if (w) {
+      stats[val].wins += 1;
+      overallWins += 1;
+    }
+  }
+
+  if (overallTotal < minSamples) return null;
+  const overallWinRate = overallTotal > 0 ? overallWins / overallTotal : 0;
+  const nextWeights = {};
+  const changes = [];
+
+  for (const bucket of buckets) {
+    const stat = stats[bucket];
+    if (!stat || stat.total < 2) {
+      nextWeights[bucket] = 1.0;
+      continue;
+    }
+    const winRate = stat.wins / stat.total;
+    const raw = 1 + (winRate - overallWinRate) * 2;
+    const next = Math.round(clampWeight(raw, weightFloor, weightCeiling) * 1000) / 1000;
+    nextWeights[bucket] = next;
+    changes.push({
+      signal,
+      bucket,
+      from: null,
+      to: next,
+      win_rate: Math.round(winRate * 1000) / 1000,
+      action: "set",
+    });
+  }
+
+  return { weights: nextWeights, changes };
+}
 
 // ─── Persistence ─────────────────────────────────────────────────
 
 function loadWeights() {
   if (!fs.existsSync(WEIGHTS_FILE)) {
     const initial = {
-      weights: { ...DEFAULT_WEIGHTS },
+      weights: createDefaultWeights(),
       last_recalc: null,
       recalc_count: 0,
       history: [],
@@ -64,11 +187,13 @@ function loadWeights() {
     return initial;
   }
   try {
-    return JSON.parse(fs.readFileSync(WEIGHTS_FILE, "utf8"));
+    const parsed = JSON.parse(fs.readFileSync(WEIGHTS_FILE, "utf8"));
+    parsed.weights = ensureWeightsShape(parsed.weights);
+    return parsed;
   } catch (err) {
     log("signal_weights_error", `Failed to read signal-weights.json: ${err.message}`);
     return {
-      weights: { ...DEFAULT_WEIGHTS },
+      weights: createDefaultWeights(),
       last_recalc: null,
       recalc_count: 0,
       history: [],
@@ -103,11 +228,15 @@ export function recalculateWeights(perfData, cfg = {}) {
   const weightCeiling = darwin.weightCeiling ?? 2.5;
 
   const data = loadWeights();
-  const weights = data.weights || { ...DEFAULT_WEIGHTS };
+  const weights = ensureWeightsShape(data.weights || createDefaultWeights());
 
   // Ensure all signals exist (handles new signals added after initial creation)
   for (const name of SIGNAL_NAMES) {
-    if (weights[name] == null) weights[name] = 1.0;
+    if (CATEGORICAL_SIGNALS.has(name)) {
+      if (!weights[name] || typeof weights[name] !== "object") {
+        weights[name] = { ...DEFAULT_CATEGORICAL_WEIGHTS[name] };
+      }
+    } else if (weights[name] == null) weights[name] = 1.0;
   }
 
   // Filter to rolling window
@@ -144,7 +273,7 @@ export function recalculateWeights(perfData, cfg = {}) {
   // Compute predictive lift for each signal
   const lifts = {};
   for (const signal of SIGNAL_NAMES) {
-    const lift = computeLift(signal, wins, losses, minSamples);
+    const lift = computeLift(signal, wins, losses, minSamples, cfg);
     if (lift !== null) lifts[signal] = lift;
   }
 
@@ -164,6 +293,36 @@ export function recalculateWeights(perfData, cfg = {}) {
   // Apply boosts and decays
   const changes = [];
   for (const [signal, lift] of ranked) {
+    if (CATEGORICAL_SIGNALS.has(signal)) {
+      const result = computeCategoricalWeights(
+        signal,
+        wins,
+        losses,
+        minSamples,
+        weightFloor,
+        weightCeiling,
+      );
+      if (!result) continue;
+      const prevWeights = weights[signal] || { ...DEFAULT_CATEGORICAL_WEIGHTS[signal] };
+      const nextWeights = { ...prevWeights };
+      for (const [bucket, next] of Object.entries(result.weights)) {
+        const prev = Number(prevWeights[bucket] ?? 1.0);
+        nextWeights[bucket] = next;
+        if (next !== prev) {
+          changes.push({
+            signal,
+            bucket,
+            from: prev,
+            to: next,
+            lift: Math.round(lift * 1000) / 1000,
+            action: next > prev ? "boosted" : "decayed",
+          });
+        }
+      }
+      weights[signal] = nextWeights;
+      continue;
+    }
+
     const prev = weights[signal];
     let next = prev;
 
@@ -330,10 +489,15 @@ export function getWeightsSummary() {
   const w = data.weights || {};
 
   const lines = ["Signal Weights (Darwinian — learned from past positions):"];
-  const sorted = SIGNAL_NAMES.filter((s) => w[s] != null).sort((a, b) => (w[b] ?? 1) - (w[a] ?? 1));
-
-  for (const signal of sorted) {
-    const val = w[signal] ?? 1.0;
+  for (const signal of SIGNAL_NAMES) {
+    if (CATEGORICAL_SIGNALS.has(signal)) {
+      if (w[signal] && typeof w[signal] === "object") {
+        lines.push(...summarizeCategoricalWeights(signal, w[signal]));
+      }
+      continue;
+    }
+    if (w[signal] == null) continue;
+    const val = Number(w[signal] ?? 1.0);
     const label = interpretWeight(val);
     const bar = weightBar(val);
     lines.push(`  ${signal.padEnd(24)} ${val.toFixed(2)}  ${bar}  ${label}`);

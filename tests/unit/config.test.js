@@ -64,6 +64,7 @@ describe("config defaults (no user-config.json)", () => {
 describe("user-config overrides", () => {
   it("applies user values over defaults", async () => {
     const { config } = await loadConfig({
+      preset: "main",
       maxPositions: 1,
       deployAmountSol: 0.3,
       maxDeployAmount: 0.55,
@@ -81,6 +82,14 @@ describe("user-config overrides", () => {
     expect(config.screening.minTvl).toBe(15_000);
     expect(config.screening.maxTvl).toBe(120_000);
     expect(config.screening.maxVolatility).toBe(6);
+    expect(config.screening.tokenAgeSweetMinHours).toBe(12);
+    expect(config.screening.tokenAgeSweetMaxHours).toBe(48);
+    expect(config.screening.surfaceTokenAge).toBe(true);
+  });
+
+  it("keeps surfaceTokenAge disabled unless preset is main", async () => {
+    const { config } = await loadConfig({ preset: "evil-panda" });
+    expect(config.screening.surfaceTokenAge).toBe(false);
   });
 
   it("preserves explicit zero values (does not fall through to default)", async () => {

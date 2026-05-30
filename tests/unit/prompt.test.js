@@ -12,6 +12,9 @@ vi.mock("../../config.js", () => ({
       maxFreshWalletsPct: 40,
       maxBundlersPct: 60,
       minTokenAgeHours: null,
+      tokenAgeSweetMinHours: 12,
+      tokenAgeSweetMaxHours: 48,
+      surfaceTokenAge: true,
       minMcap: 150000,
       minBinStep: 80,
       maxBinStep: 125,
@@ -79,6 +82,14 @@ describe("buildSystemPrompt", () => {
     it("uses default '24h' when minTokenAgeHours is null", () => {
       const out = buildSystemPrompt("SCREENER", portfolio, positions);
       expect(out).toContain("coin age < 24h");
+    });
+
+    it("surfaces the token_age_bucket cluster note when enabled", () => {
+      const out = buildSystemPrompt("SCREENER", portfolio, positions);
+      expect(out).toContain("TOKEN AGE BUCKET — Darwin signal only, not a hard gate");
+      expect(out).toContain("young (< 12h)");
+      expect(out).toContain("sweet (12-48h)");
+      expect(out).toContain("24h fee/TVL is king");
     });
 
     it("includes weightsSummary when provided", () => {

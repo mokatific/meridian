@@ -58,6 +58,8 @@
   "blockedLaunchpads": [],
   "minTokenAgeHours": 6,
   "maxTokenAgeHours": null,
+  "tokenAgeSweetMinHours": 12,
+  "tokenAgeSweetMaxHours": 48,
   "athFilterPct": null,
 
   "_title5": "Position Management",

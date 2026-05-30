@@ -72,7 +72,7 @@ import { getCausalAnalysisSummary } from "./causal-analysis.js";
 import { tickPaperPositions } from "./paper-positions.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { stageSignals } from "./signal-tracker.js";
-import { getWeightsSummary } from "./signal-weights.js";
+import { classifyTokenAgeBucket, getWeightsSummary } from "./signal-weights.js";
 import {
   bootstrapHiveMind,
   ensureAgentId,
@@ -1160,10 +1160,14 @@ export async function runScreeningCycle({ silent = false } = {}) {
       const pvpLine = pool.is_pvp
         ? `  pvp: HIGH — rival ${pool.pvp_rival_name || pool.pvp_symbol} (${pool.pvp_rival_mint?.slice(0, 8)}...) has pool ${pool.pvp_rival_pool?.slice(0, 8)}..., tvl=$${pool.pvp_rival_tvl}, holders=${pool.pvp_rival_holders}, fees=${pool.pvp_rival_fees}SOL`
         : null;
+      const ageBucketSuffix =
+        config.screening.surfaceTokenAge && pool.token_age_bucket
+          ? `, age_bucket=${pool.token_age_bucket}`
+          : "";
 
       const block = [
         `POOL: ${pool.name} (${pool.pool})`,
-        `  metrics: bin_step=${pool.bin_step}, fee_pct=${pool.fee_pct}%, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.tvl ?? pool.active_tvl}, volatility_${pool.volatility_timeframe || "30m"}=${pool.volatility}, mcap=$${pool.mcap}, organic=${pool.organic_score}${pool.token_age_hours != null ? `, age=${pool.token_age_hours}h` : ""}`,
+        `  metrics: bin_step=${pool.bin_step}, fee_pct=${pool.fee_pct}%, fee_tvl=${pool.fee_active_tvl_ratio}, vol=$${pool.volume_window}, tvl=$${pool.tvl ?? pool.active_tvl}, volatility_${pool.volatility_timeframe || "30m"}=${pool.volatility}, mcap=$${pool.mcap}, organic=${pool.organic_score}${pool.token_age_hours != null ? `, age=${pool.token_age_hours}h` : ""}${ageBucketSuffix}`,
         `  strategy_hint: ${strategyHint.strategy} (${strategyHint.reason})`,
         pool.volatility_recommendation ? `  note: ${pool.volatility_recommendation}` : null,
         `  audit: top10=${top10Pct}%, bots=${botPct}%, fees=${feesSol}SOL${launchpad ? `, launchpad=${launchpad}` : ""}`,
@@ -1200,6 +1204,10 @@ export async function runScreeningCycle({ silent = false } = {}) {
           smart_wallet_confidence: sw?.avg_confidence ?? 0,
           narrative_quality: n?.narrative ? "present" : "absent",
           volatility: pool.volatility ?? null,
+          token_age_hours: pool.token_age_hours ?? null,
+          token_age_bucket: config.screening.surfaceTokenAge
+            ? (pool.token_age_bucket ?? classifyTokenAgeBucket(pool.token_age_hours, config))
+            : null,
         });
       }
 

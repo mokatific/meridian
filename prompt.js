@@ -218,6 +218,19 @@ Formula in code:
   multiplier = 0.8 | 1.0 | 1.3 | 1.5 based on volatility tier
   bins_below = clamp(round(base * multiplier), min=${config.strategy.minBinsBelow}, max=${config.strategy.maxBinsBelow} * 1.5)
 
+${
+  s.surfaceTokenAge
+    ? `TOKEN AGE BUCKET — Darwin signal only, not a hard gate:
+  token_age_bucket = young (< ${s.tokenAgeSweetMinHours ?? 12}h) | sweet (${s.tokenAgeSweetMinHours ?? 12}-${s.tokenAgeSweetMaxHours ?? 48}h) | mature (> ${s.tokenAgeSweetMaxHours ?? 48}h)
+  This is a learned categorical feature. Use the bucket and its learned weight; do not reject solely because a token is young or mature.
+`
+    : ""
+}
+
+CLUSTER NOTE — 24h fee/TVL is king:
+  Treat 24h fee/TVL below 20% as weak for IL coverage unless the pool has exceptional volume and momentum.
+  Spot-on-dump is the goat; prefer fee capture on the dump instead of chasing a fresh pump.
+
 Interpretation:
 - minBinsBelow is the floor, maxBinsBelow is the normal ceiling, and extreme volatility can stretch up to 1.5x the ceiling.
 - Wider bins mean more time in range but lower fee density.
