@@ -2503,6 +2503,7 @@ async function deployLatestCandidate(index) {
     bin_step: candidate.bin_step,
     base_fee: candidate.base_fee,
     volatility: candidate.volatility,
+    price_change_pct: candidate.price_change_pct ?? candidate.priceChangePct ?? null,
     fee_tvl_ratio: candidate.fee_active_tvl_ratio ?? candidate.fee_tvl_ratio,
     organic_score: candidate.organic_score,
     initial_value_usd: candidate.tvl ?? candidate.active_tvl ?? null,

@@ -248,6 +248,7 @@ const { values: flags } = parseArgs({
     reason: { type: "string" },
     "bins-below": { type: "string" },
     "bins-above": { type: "string" },
+    "price-change": { type: "string" },
     "amount-x": { type: "string" },
     "amount-y": { type: "string" },
     bps: { type: "string" },
@@ -463,6 +464,7 @@ switch (subcommand) {
         single_sided_x: argv.includes("--single-sided-x"),
         bins_below: flags["bins-below"] ? parseInt(flags["bins-below"]) : undefined,
         bins_above: flags["bins-above"] ? parseInt(flags["bins-above"]) : undefined,
+        price_change_pct: flags["price-change"] ? parseFloat(flags["price-change"]) : undefined,
         allow_duplicate_pool: argv.includes("--allow-duplicate-pool"),
       }),
     );

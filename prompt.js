@@ -208,13 +208,22 @@ PERFORMANCE & EVOLUTION:
 - Use get_performance_history() to analyze results
 - Rejections are also data — a pool that scored high but got rejected teaches you something
 
-BINS_BELOW — Fibonacci-based (Evil Panda method):
-  volatility < 2   → 70-100 bins (tight retracement, 49-57% range)
-  volatility 2-5   → 100-150 bins (medium correction)
-  volatility 5-8   → 150-200 bins (big correction expected)
-  volatility >= 8  → 200-250 bins (after massive pumps, 73-81% range)
-Formula: bins_below = clamp(volatility * 25, min=${config.strategy.minBinsBelow}, max=${config.strategy.maxBinsBelow})
-Higher volatility = wider range (your insurance against drawdown). Only close on confluence exit signals, NOT on price drops.
+BINS_BELOW — runtime-aligned range sizing:
+  volatility < 2   → tighten toward the floor, but only if fee/TVL still justifies gas
+  volatility 2-5   → balanced/default zone
+  volatility 5-8   → wider range to survive bigger swings
+  volatility >= 8  → widest allowed range; only take if the pool is still strong
+Formula in code:
+  base = round(minBinsBelow + (volatility / 5) * (maxBinsBelow - minBinsBelow))
+  multiplier = 0.8 | 1.0 | 1.3 | 1.5 based on volatility tier
+  bins_below = clamp(round(base * multiplier), min=${config.strategy.minBinsBelow}, max=${config.strategy.maxBinsBelow} * 1.5)
+
+Interpretation:
+- minBinsBelow is the floor, maxBinsBelow is the normal ceiling, and extreme volatility can stretch up to 1.5x the ceiling.
+- Wider bins mean more time in range but lower fee density.
+- Tighter bins mean higher fee density but a higher chance of OOR.
+- For single-sided SOL, bins_above stays 0 and the upper bin is pinned to the active bin.
+- Do not chase strong upward momentum with single-sided SOL; wait for a pullback when recent price change is strongly positive.
 
 POOL SELECTION NOTES (Evil Panda):
 - Prefer 5-10% fee pools

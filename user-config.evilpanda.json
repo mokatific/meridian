@@ -1,7 +1,7 @@
 {
   "preset": "evil-panda",
   "rpcUrl": "https://mainnet.helius-rpc.com/?api-key=<REDACTED>",
-  "rpcUrlFallback": "https://solana-mainnet.g.alchemy.com/v2/<REDACTED>",
+  "rpcUrlFallback": "https://solana-mainnet.core.chainstack.com/<REDACTED>",
 
   "_title1": "Dry Run Config",
   "dryRun": true,

@@ -49,7 +49,7 @@ import {
   listPaperPositionsTool,
 } from "./simulator.js";
 import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW } from "../config.js";
-import { getRecentDecisions } from "../decision-log.js";
+import { getRecentDecisions, appendDecision } from "../decision-log.js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -409,6 +409,7 @@ const toolMap = {
       timeframe: ["screening", "timeframe"],
       category: ["screening", "category"],
       minTokenFeesSol: ["screening", "minTokenFeesSol"],
+      maxPositiveEntryPriceChangePct: ["screening", "maxPositiveEntryPriceChangePct"],
       maxVolatility: ["screening", "maxVolatility"],
       useDiscordSignals: ["screening", "useDiscordSignals"],
       discordSignalMode: ["screening", "discordSignalMode"],
@@ -846,6 +847,7 @@ async function runSafetyChecks(name, args) {
 
       const deployAmountY = Number(args.amount_y ?? args.amount_sol ?? 0);
       const deployAmountX = Number(args.amount_x ?? 0);
+      const priceChangePct = args.price_change_pct == null ? null : Number(args.price_change_pct);
       if (Number.isFinite(deployAmountX) && deployAmountX > 0) {
         return {
           pass: false,
@@ -925,6 +927,38 @@ async function runSafetyChecks(name, args) {
         return {
           pass: false,
           reason: "Single-side SOL deploy must use bins_above=0.",
+        };
+      }
+      if (
+        isSingleSidedSol &&
+        priceChangePct != null &&
+        Number.isFinite(priceChangePct) &&
+        priceChangePct > Number(config.screening.maxPositiveEntryPriceChangePct ?? 3)
+      ) {
+        try {
+          appendDecision({
+            type: "screen_reject",
+            actor: "EXECUTOR",
+            pool: args.pool_address,
+            pool_name: args.pool_name || null,
+            summary: "Anti-chase guard: recent positive price move",
+            reason: `Recent price change ${priceChangePct.toFixed(2)}% > configured threshold ${Number(
+              config.screening.maxPositiveEntryPriceChangePct ?? 3,
+            ).toFixed(2)}% for single-sided SOL deploys. Rejecting to avoid chasing the pump.`,
+            metrics: {
+              priceChangePct: Number(priceChangePct),
+              thresholdPct: Number(config.screening.maxPositiveEntryPriceChangePct ?? 3),
+            },
+          });
+        } catch (e) {
+          // best-effort logging; do not block the rejection if logging fails
+          log("decision_log_error", `appendDecision failed: ${e.message}`);
+        }
+        return {
+          pass: false,
+          reason: `Recent price change ${priceChangePct.toFixed(2)}% is too positive for single-side SOL. Wait for a pullback instead of chasing the pump (threshold: ${Number(
+            config.screening.maxPositiveEntryPriceChangePct ?? 3,
+          ).toFixed(2)}%).`,
         };
       }
 

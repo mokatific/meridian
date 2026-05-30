@@ -88,6 +88,8 @@ export const config = {
     timeframe: u.timeframe ?? "5m",
     category: u.category ?? "trending",
     minTokenFeesSol: u.minTokenFeesSol ?? 30, // global fees paid (priority+jito tips). below = bundled/scam
+    // Do not chase strong positive moves with single-sided SOL deploys. Default 3 (%)
+    maxPositiveEntryPriceChangePct: u.maxPositiveEntryPriceChangePct ?? 3,
     maxVolatility: u.maxVolatility ?? null, // max pool volatility to screen (null = no cap)
     useDiscordSignals: u.useDiscordSignals ?? false,
     discordSignalMode: u.discordSignalMode ?? "merge", // merge | only

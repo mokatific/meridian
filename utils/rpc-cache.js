@@ -15,8 +15,8 @@
  * Failover applies to ALL methods (read + write).
  *
  * ENV:
- *   RPC_URL          — primary RPC (Alchemy)
- *   RPC_URL_FALLBACK — fallback RPC (Helius)
+ *   RPC_URL          — primary RPC (Helius)
+ *   RPC_URL_FALLBACK — fallback RPC (Other)
  */
 
 import {
@@ -237,7 +237,7 @@ async function confirmTransactionByPolling(conn, ...args) {
 
 /**
  * Create a cached Connection with automatic failover.
- * Primary: RPC_URL (Alchemy), Fallback: RPC_URL_FALLBACK (Helius)
+ * Primary: RPC_URL (Helius), Fallback: RPC_URL_FALLBACK (Other)
  */
 export function createCachedConnection(rpcUrl, commitmentOrConfig = "confirmed") {
   const fallbackUrl = process.env.RPC_URL_FALLBACK;
