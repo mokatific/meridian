@@ -1,3 +1,53 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { condensePool } from "../../tools/screening.js";
+import { config } from "../../config.js";
+import { classifyTokenAgeBucket } from "../../signal-weights.js";
+
+describe("condensePool token age fields", () => {
+  beforeEach(() => {
+    // Ensure surfaceTokenAge is enabled for the test
+    config.screening.surfaceTokenAge = true;
+    config.screening.tokenAgeSweetMinHours = 12;
+    config.screening.tokenAgeSweetMaxHours = 48;
+  });
+
+  it("includes token_age_hours and token_age_bucket when enabled", () => {
+    const now = Date.now();
+    const createdAt = now - 24 * 3_600_000; // 24 hours ago
+
+    const p = {
+      pool_address: "testpool",
+      name: "Test Pool",
+      token_x: {
+        created_at: createdAt,
+        symbol: "TST",
+        address: "mintTST",
+        organic_score: 70,
+        warnings: [],
+      },
+      token_y: { symbol: "SOL", address: "solMint" },
+      dlmm_params: { bin_step: 100 },
+      fee_pct: 0.3,
+      tvl: 20000,
+      active_tvl: 15000,
+      fee: 50,
+      volume: 1000,
+      fee_active_tvl_ratio: 0.2,
+      volatility: 1.2,
+      pool_price: 1,
+      pool_price_change_pct: 0,
+      pool_type: "dlmm",
+    };
+
+    const out = condensePool(p);
+    expect(out).toHaveProperty("token_age_hours");
+    const expectedHours = Math.floor((Date.now() - createdAt) / 3_600_000);
+    expect(out.token_age_hours).toBe(expectedHours);
+
+    const expectedBucket = classifyTokenAgeBucket(expectedHours, config);
+    expect(out).toHaveProperty("token_age_bucket", expectedBucket);
+  });
+});
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../logger.js", () => ({ log: vi.fn() }));

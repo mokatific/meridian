@@ -1232,6 +1232,12 @@ export async function getPoolDetail({ pool_address, timeframe = "5m" }) {
  * Raw API returns ~100+ fields per pool. The LLM only needs ~20.
  */
 function condensePool(p) {
+  const tokenAgeHours = p.token_x?.created_at
+    ? Math.floor((Date.now() - p.token_x.created_at) / 3_600_000)
+    : null;
+  const tokenAgeBucket = config.screening.surfaceTokenAge
+    ? classifyTokenAgeBucket(tokenAgeHours, config)
+    : null;
   return {
     pool: p.pool_address,
     name: p.name,
